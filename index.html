@@ -387,14 +387,14 @@
       const [sortBy, setSortBy] = useState('featured');
 
       // Checkout Form State
-      const [checkoutForm, setCheckoutForm] = useState({
-        customerName: '',
-        customerEmail: '',
-        whatsappNumber: '',
-        consoleModel: 'PS5 Console',
-        paymentMethod: 'card',
-        agreedToRules: false
-      });
+const [checkoutForm, setCheckoutForm] = useState({
+  customerName: '',
+  customerEmail: '',
+  whatsappNumber: '',
+  consoleModel: '',
+  paymentMethod: 'vodafone_instapay',
+  agreedToRules: false
+});
       const [submittingOrder, setSubmittingOrder] = useState(false);
 
       // Admin Panel State
@@ -745,42 +745,38 @@
         return digits || '201205047037';
       };
 
-      const buildWhatsAppUrl = (order) => {
-        let parsedItems = [];
-        try {
-          parsedItems = JSON.parse(order.deliveredAccounts || '[]');
-        } catch (e) {
-          parsedItems = [];
-        }
-        const itemsLines = parsedItems
-          .map((item, idx) => `${idx + 1}. ${item.title} (${item.console} - ${item.licenseType === 'Primary' ? tr('نسخة أساسي Primary', 'Primary Edition') : tr('نسخة ثانوي Secondary', 'Secondary Edition')}) - ${formatEGP(item.pricePaid, lang)}`)
-          .join('\n');
+    const buildWhatsAppUrl = (order) => {
+  let parsedItems = [];
+  try {
+    parsedItems = JSON.parse(order.deliveredAccounts || '[]');
+  } catch (e) {
+    parsedItems = [];
+  }
+  const itemsLines = parsedItems
+    .map((item, idx) => `${idx + 1}. ${item.title} (${item.console} - ${item.licenseType === 'Primary' ? tr('نسخة أساسي Primary', 'Primary Edition') : tr('نسخة ثانوي Secondary', 'Secondary Edition')}) - ${formatEGP(item.pricePaid, lang)}`)
+    .join('\n');
 
-        const message = isAr
-          ? `مرحباً إدارة متجر Bonka Store! 👋
+  const message = isAr
+    ? `مرحباً إدارة متجر Bonka Store! 👋
 أريد تأكيد طلبي لألعاب البلايستيشن:
 
 🧾 *رقم الطلب:* ${order.orderNumber}
-👤 *الاسم:* ${order.customerName}
-📧 *البريد الإلكتروني:* ${order.customerEmail}
+👤 *الاسم الثلاثي:* ${order.customerName}
 📱 *رقم الواتساب:* ${order.whatsappNumber || 'غير مسجل'}
-🎮 *الجهاز:* ${order.consoleModel}
-💳 *طريقة الدفع:* ${order.paymentMethod.toUpperCase()}
+💳 *طريقة الدفع:* فودافون كاش / إنستا باي
 💰 *الإجمالي المطلوب:* ${formatEGP(order.totalAmount, 'ar')}
 
 📦 *الألعاب المطلوبة:*
 ${itemsLines}
 
 يرجى تأكيد طلبي وفتح بيانات حساب البلايستيشن (الإيميل والرقم السري)!`
-          : `Hello Bonka Store Admin! 👋
+    : `Hello Bonka Store Admin! 👋
 I would like to confirm my PlayStation order:
 
 🧾 *Order ID:* ${order.orderNumber}
-👤 *Name:* ${order.customerName}
-📧 *Email:* ${order.customerEmail}
+👤 *Full Name:* ${order.customerName}
 📱 *WhatsApp:* ${order.whatsappNumber || 'N/A'}
-🎮 *Console:* ${order.consoleModel}
-💳 *Payment Method:* ${order.paymentMethod.toUpperCase()}
+💳 *Payment Method:* Vodafone Cash / InstaPay
 💰 *Total Paid:* ${formatEGP(order.totalAmount, 'en')}
 
 📦 *Ordered Games:*
@@ -788,10 +784,9 @@ ${itemsLines}
 
 Please confirm my order and unlock my PSN account credentials!`;
 
-        const cleanPhone = formatWhatsAppPhone(storeConfig.whatsappNumber);
-        return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
-      };
-
+  const cleanPhone = formatWhatsAppPhone(storeConfig.whatsappNumber);
+  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+};
       const handleConfirmViaMessenger = async (order) => {
         copyTextToClipboard(
           isAr
@@ -3851,157 +3846,116 @@ Please confirm my order and unlock my PSN account credentials!`;
                 </div>
               )}
 
-              {/* Checkout Modal */}
-              {checkoutModalOpen && (
-                <div
-                  className={
-                    previewDevice === 'mobile'
-                      ? 'sticky bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-md p-2 max-h-[780px] overflow-y-auto'
-                      : 'fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto'
-                  }
-                >
-                  <div className={`w-full ${previewDevice === 'mobile' ? 'rounded-3xl p-4 space-y-4' : 'max-w-lg rounded-3xl p-6 sm:p-8 space-y-6 my-8'} bg-slate-900 border border-white/15 shadow-2xl`}>
-                    <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                      <div>
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400">
-                          {tr('تسليم رقمي آمن وسريع', 'Fast & Secure Digital Delivery')}
-                        </span>
-                        <h3 className="text-xl font-black text-white">{tr('إتمام بيانات الطلب', 'Complete Your Order')}</h3>
-                      </div>
-                      <button
-                        onClick={() => setCheckoutModalOpen(false)}
-                        className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
+{/* Checkout Modal */}
+{checkoutModalOpen && (
+  <div
+    className={
+      previewDevice === 'mobile'
+        ? 'sticky bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-md p-2 max-h-[780px] overflow-y-auto'
+        : 'fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto'
+    }
+  >
+    <div className={`w-full ${previewDevice === 'mobile' ? 'rounded-3xl p-4 space-y-4' : 'max-w-lg rounded-3xl p-6 sm:p-8 space-y-6 my-8'} bg-slate-900 border border-white/15 shadow-2xl`}>
+      <div className="flex items-center justify-between border-b border-white/10 pb-4">
+        <div>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-blue-400">
+            {tr('تسليم رقمي آمن وسريع', 'Fast & Secure Digital Delivery')}
+          </span>
+          <h3 className="text-xl font-black text-white">{tr('إتمام بيانات الطلب', 'Complete Your Order')}</h3>
+        </div>
+        <button
+          onClick={() => setCheckoutModalOpen(false)}
+          className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-                    <form onSubmit={handleCompleteCheckout} className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
-                          {tr('الاسم الكامل *', 'Full Name *')}
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={checkoutForm.customerName}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, customerName: e.target.value })}
-                          placeholder={tr('أحمد محمد', 'Ahmed Mohamed')}
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white"
-                        />
-                      </div>
+      <form onSubmit={handleCompleteCheckout} className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
+            {tr('الاسم الثلاثي *', 'Full Name (Three-Part Name) *')}
+          </label>
+          <input
+            type="text"
+            required
+            value={checkoutForm.customerName}
+            onChange={(e) => setCheckoutForm({ ...checkoutForm, customerName: e.target.value })}
+            placeholder={tr('أحمد محمد علي', 'Ahmed Mohamed Ali')}
+            className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white"
+          />
+        </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
-                            {tr('البريد الإلكتروني *', 'Email Address *')}
-                          </label>
-                          <input
-                            type="email"
-                            required
-                            dir="ltr"
-                            value={checkoutForm.customerEmail}
-                            onChange={(e) => setCheckoutForm({ ...checkoutForm, customerEmail: e.target.value })}
-                            placeholder="gamer@example.com"
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold uppercase text-emerald-400 mb-1">
-                            {tr('رقم الواتساب الخاص بك *', 'Your WhatsApp Number *')}
-                          </label>
-                          <input
-                            type="tel"
-                            required
-                            dir="ltr"
-                            value={checkoutForm.whatsappNumber}
-                            onChange={(e) => setCheckoutForm({ ...checkoutForm, whatsappNumber: e.target.value })}
-                            placeholder="01012345678"
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-sm text-white font-mono"
-                          />
-                        </div>
-                      </div>
+        <div>
+          <label className="block text-xs font-bold uppercase text-emerald-400 mb-1">
+            {tr('رقم الواتساب الخاص بك *', 'Your WhatsApp Number *')}
+          </label>
+          <input
+            type="tel"
+            required
+            dir="ltr"
+            value={checkoutForm.whatsappNumber}
+            onChange={(e) => setCheckoutForm({ ...checkoutForm, whatsappNumber: e.target.value })}
+            placeholder="01012345678"
+            className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-sm text-white font-mono"
+          />
+        </div>
 
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
-                          {tr('نوع جهاز البلايستيشن لديك', 'Your PlayStation Console')}
-                        </label>
-                        <select
-                          value={checkoutForm.consoleModel}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, consoleModel: e.target.value })}
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white"
-                        >
-                          <option value="PS5 Console">{tr('بلايستيشن 5 (PS5 / PS5 Pro)', 'PlayStation 5 (PS5 / PS5 Pro)')}</option>
-                          <option value="PS4 Console">{tr('بلايستيشن 4 (PS4 / PS4 Pro)', 'PlayStation 4 (PS4 / PS4 Pro)')}</option>
-                        </select>
-                      </div>
+        <div>
+          <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">
+            {tr('طريقة الدفع المفضلة', 'Preferred Payment Method')}
+          </label>
+          <div className="grid grid-cols-1 gap-2">
+            <button
+              type="button"
+              onClick={() => setCheckoutForm({ ...checkoutForm, paymentMethod: 'vodafone_instapay' })}
+              className="py-3 px-4 rounded-xl text-xs font-bold border transition-all bg-blue-600/20 border-blue-500 text-white"
+            >
+              {tr('فودافون كاش / إنستا باي', 'Vodafone Cash / InstaPay')}
+            </button>
+          </div>
+        </div>
 
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">
-                          {tr('طريقة الدفع المفضلة', 'Preferred Payment Method')}
-                        </label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { id: 'vodafone_instapay', label: tr('فودافون كاش / إنستا باي', 'Vodafone Cash / InstaPay') },
-                            { id: 'card', label: tr('بطاقة بنكية / فيزا', 'Credit / Debit Card') },
-                            { id: 'crypto', label: tr('USDT / عملات رقمية', 'USDT / Crypto') }
-                          ].map((pm) => (
-                            <button
-                              type="button"
-                              key={pm.id}
-                              onClick={() => setCheckoutForm({ ...checkoutForm, paymentMethod: pm.id })}
-                              className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                                checkoutForm.paymentMethod === pm.id
-                                  ? 'bg-blue-600/20 border-blue-500 text-white'
-                                  : 'bg-slate-950 border-white/10 text-slate-400'
-                              }`}
-                            >
-                              {pm.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+        <label className="flex items-start gap-3 p-3.5 rounded-2xl bg-slate-950 border border-white/10 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={checkoutForm.agreedToRules}
+            onChange={(e) => setCheckoutForm({ ...checkoutForm, agreedToRules: e.target.checked })}
+            className="mt-1 rounded text-blue-600 focus:ring-0"
+          />
+          <span className="text-xs text-slate-300 leading-relaxed">
+            {tr(
+              'أوافق وأقر بأنني أفهم أن الحساب الأساسي (Primary) يتم تفعيله لمشاركة الجهاز واللعب من حسابي الشخصي، بينما الحساب الثانوي (Secondary) يتم اللعب به من داخل الحساب المرسل مع وجود إنترنت.',
+              'I understand that Primary Accounts enable Console Sharing to play on my personal profile, while Secondary Accounts are played on the delivered profile with an internet connection.'
+            )}
+          </span>
+        </label>
 
-                      <label className="flex items-start gap-3 p-3.5 rounded-2xl bg-slate-950 border border-white/10 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={checkoutForm.agreedToRules}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, agreedToRules: e.target.checked })}
-                          className="mt-1 rounded text-blue-600 focus:ring-0"
-                        />
-                        <span className="text-xs text-slate-300 leading-relaxed">
-                          {tr(
-                            'أوافق وأقر بأنني أفهم أن الحساب الأساسي (Primary) يتم تفعيله لمشاركة الجهاز واللعب من حسابي الشخصي، بينما الحساب الثانوي (Secondary) يتم اللعب به من داخل الحساب المرسل مع وجود إنترنت.',
-                            'I understand that Primary Accounts enable Console Sharing to play on my personal profile, while Secondary Accounts are played on the delivered profile with an internet connection.'
-                          )}
-                        </span>
-                      </label>
+        <div className="p-4 rounded-2xl bg-blue-950/30 border border-blue-500/30 flex items-center justify-between">
+          <div>
+            <span className="text-xs text-slate-300 block">{tr(`إجمالي الطلب (${cartTotals.count} ألعاب)`, `Order Total (${cartTotals.count} items)`)}</span>
+            <span className="text-[11px] text-emerald-400 font-semibold">
+              {tr(`وفرت ${formatEGP(cartTotals.totalSavings, lang)}`, `You save ${formatEGP(cartTotals.totalSavings, lang)}`)}
+            </span>
+          </div>
+          <span className="text-2xl font-black text-white">
+            {formatEGP(cartTotals.subtotal, lang)}
+          </span>
+        </div>
 
-                      <div className="p-4 rounded-2xl bg-blue-950/30 border border-blue-500/30 flex items-center justify-between">
-                        <div>
-                          <span className="text-xs text-slate-300 block">{tr(`إجمالي الطلب (${cartTotals.count} ألعاب)`, `Order Total (${cartTotals.count} items)`)}</span>
-                          <span className="text-[11px] text-emerald-400 font-semibold">
-                            {tr(`وفرت ${formatEGP(cartTotals.totalSavings, lang)}`, `You save ${formatEGP(cartTotals.totalSavings, lang)}`)}
-                          </span>
-                        </div>
-                        <span className="text-2xl font-black text-white">
-                          {formatEGP(cartTotals.subtotal, lang)}
-                        </span>
-                      </div>
-
-                      <button
-                        type="submit"
-                        disabled={submittingOrder}
-                        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/25 transition-all"
-                      >
-                        {submittingOrder
-                          ? tr('جاري تسجيل الطلب...', 'Submitting Order...')
-                          : tr(`تأكيد الطلب (${formatEGP(cartTotals.subtotal, lang)}) والمتابعة`, `Confirm Order (${formatEGP(cartTotals.subtotal, lang)})`)}
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              )}
+        <button
+          type="submit"
+          disabled={submittingOrder}
+          className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/25 transition-all"
+        >
+          {submittingOrder
+            ? tr('جاري تسجيل الطلب...', 'Submitting Order...')
+            : tr(`تأكيد الطلب (${formatEGP(cartTotals.subtotal, lang)}) والمتابعة`, `Confirm Order (${formatEGP(cartTotals.subtotal, lang)})`)}
+        </button>
+      </form>
+    </div>
+  </div>
+)}
 
               {/* Game Details Inspection Modal */}
               {selectedGameModal && (
