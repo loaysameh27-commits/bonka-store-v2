@@ -78,12 +78,12 @@
       onSnapshot 
     } from 'firebase/firestore';
     import { 
-      Gamepad2, ShoppingCart, ShieldCheck, KeyRound, Search, Filter, 
-      Sparkles, CheckCircle2, AlertCircle, Trash2, Plus, Edit3, 
-      Package, CreditCard, ChevronRight, ChevronDown, X, Info, Award, Zap, 
-      Copy, Check, Terminal, RefreshCw, Layers, Eye, Lock, Globe,
-      Wifi, WifiOff, Trophy, UserCheck, Flame, SlidersHorizontal, ArrowUpRight,
-      MessageCircle, Send, PhoneCall, Clock, Unlock, CheckCheck, ExternalLink,
+      Gamepad2, ShoppingCart, ShieldCheck, KeyRound, Search, 
+      Sparkles, CheckCircle2, AlertCircle, Trash2, 
+      Package, CreditCard, ChevronDown, X, Info, Zap, 
+      Copy, Check, RefreshCw, Eye, Lock, Globe,
+      Trophy, UserCheck, SlidersHorizontal, ArrowUpRight,
+      MessageCircle, PhoneCall, ExternalLink,
       Smartphone, Monitor, User, Upload, Image as ImageIcon, Tag, Wallet
     } from 'lucide-react';
 
@@ -108,7 +108,7 @@
         auth = getAuth(app);
         db = getFirestore(app);
       } catch (e) {
-        console.warn("Firebase initialization skipped, using Cloud Sync + Local mode.", e);
+        console.warn("Firebase initialization skipped, using local storage mode.", e);
       }
     }
 
@@ -120,37 +120,6 @@
     } catch (e) {
       syncChannel = null;
     }
-
-    // ============================================================================
-    // CROSS-DEVICE CLOUD SYNC ENGINE (PC <-> Mobile Sync without Firebase setup)
-    // ============================================================================
-    const CLOUD_SYNC_BUCKET = 'bonka_ps_store_v3_global_sync_2026';
-    const CLOUD_SYNC_KEYS = ['games', 'settings', 'promo_codes', 'account_pool'];
-
-    const pushToCloudSync = async (key, data) => {
-      if (!CLOUD_SYNC_KEYS.includes(key)) return;
-      const payload = JSON.stringify({ updatedAt: Date.now(), data });
-      try {
-        await fetch(`https://kvdb.io/A6Xy9nK8mP2qW4zR7vB1tL/${CLOUD_SYNC_BUCKET}_${key}`, {
-          method: 'POST',
-          body: payload
-        });
-      } catch (e) {}
-    };
-
-    const pullFromCloudSync = async (key) => {
-      if (!CLOUD_SYNC_KEYS.includes(key)) return null;
-      try {
-        const res = await fetch(`https://kvdb.io/A6Xy9nK8mP2qW4zR7vB1tL/${CLOUD_SYNC_BUCKET}_${key}?t=${Date.now()}`);
-        if (res.ok) {
-          const parsed = await res.json();
-          if (parsed && parsed.data !== undefined) {
-            return parsed;
-          }
-        }
-      } catch (e) {}
-      return null;
-    };
 
     const INITIAL_GAMES_SEED = [
       {
@@ -354,53 +323,55 @@
       return url;
     };
 
-    // Normalizes ANY phone number or wa.me link into a clean international phone number
-    const extractCleanPhoneNumber = (rawInput) => {
-      let val = (rawInput || '').trim();
-      if (!val) {
-        try {
-          const saved = JSON.parse(localStorage.getItem('bonka_local_settings') || 'null');
-          if (saved && saved.whatsappNumber) val = saved.whatsappNumber.trim();
-        } catch (e) {}
-      }
-      if (!val || val.includes('wa.me/qr/')) {
+    // Extract clean international phone number (e.g. 201205047037) so WhatsApp API pre-fills text reliably
+    const extractWhatsAppPhone = (rawInput) => {
+      const val = String(rawInput || '').trim();
+      if (!val || val.includes('wa.me/qr/') || val === '201000000000') {
         return DEFAULT_WHATSAPP_NUMBER;
       }
-      // If user pasted a wa.me/201... link, extract the digits
-      const digitsOnly = val.replace(/[^0-9]/g, '');
-      if (digitsOnly.length >= 10) {
-        if (digitsOnly.startsWith('00')) return digitsOnly.slice(2);
-        if (digitsOnly.startsWith('01') && digitsOnly.length === 11) return `2${digitsOnly}`;
-        return digitsOnly;
+      const digits = val.replace(/[^0-9]/g, '');
+      if (digits.length >= 10) {
+        return digits.startsWith('01') ? `2${digits}` : digits;
       }
       return DEFAULT_WHATSAPP_NUMBER;
     };
 
-    const getWhatsAppBaseUrl = (rawInput) => {
-      const cleanPhone = extractCleanPhoneNumber(rawInput);
-      return `https://api.whatsapp.com/send?phone=${cleanPhone}`;
+    const getWhatsAppDirectChatUrl = (rawInput, messageText = '') => {
+      const phone = extractWhatsAppPhone(rawInput);
+      if (messageText) {
+        return `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(messageText)}`;
+      }
+      return `https://api.whatsapp.com/send?phone=${phone}`;
     };
 
-    // Compress uploaded receipt image for fast storage & cloud upload
+    // Fast image compression that never hangs
     const compressReceiptImage = (file) => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (event) => {
           const img = new Image();
           img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 900;
-            const scale = img.width > MAX_WIDTH ? MAX_WIDTH / img.width : 1;
-            canvas.width = Math.round(img.width * scale);
-            canvas.height = Math.round(img.height * scale);
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            canvas.toBlob(
-              (blob) => resolve({ dataUrl, blob }),
-              'image/jpeg',
-              0.8
-            );
+            try {
+              const canvas = document.createElement('canvas');
+              const MAX_WIDTH = 800;
+              const scale = img.width > MAX_WIDTH ? MAX_WIDTH / img.width : 1;
+              canvas.width = Math.round(img.width * scale);
+              canvas.height = Math.round(img.height * scale);
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+              if (typeof canvas.toBlob === 'function') {
+                canvas.toBlob(
+                  (blob) => resolve({ dataUrl, blob }),
+                  'image/jpeg',
+                  0.72
+                );
+              } else {
+                resolve({ dataUrl, blob: null });
+              }
+            } catch (err) {
+              reject(err);
+            }
           };
           img.onerror = reject;
           img.src = event.target.result;
@@ -410,36 +381,51 @@
       });
     };
 
-    // Upload image to a public cloud host so a clickable link can be sent directly in WhatsApp text
-    const uploadReceiptToCloud = async (blob, filename = 'receipt.jpg') => {
-      try {
-        const form1 = new FormData();
-        form1.append('reqtype', 'fileupload');
-        form1.append('time', '72h');
-        form1.append('fileToUpload', blob, filename);
-        const res1 = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
-          method: 'POST',
-          body: form1
-        });
-        if (res1.ok) {
-          const textUrl = (await res1.text()).trim();
-          if (textUrl.startsWith('http')) return textUrl;
+    // Non-blocking background cloud upload with strict 4.5s timeout so the app NEVER freezes
+    const uploadReceiptWithTimeout = async (blob, filename = 'receipt.jpg') => {
+      if (!blob) return null;
+
+      const fetchWithTimeout = async (url, options, ms = 4500) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), ms);
+        try {
+          const res = await fetch(url, { ...options, signal: controller.signal });
+          clearTimeout(timer);
+          return res;
+        } catch (err) {
+          clearTimeout(timer);
+          throw err;
         }
-      } catch (e) {}
+      };
 
       try {
         const form2 = new FormData();
         form2.append('file', blob, filename);
-        const res2 = await fetch('https://tmpfiles.org/api/v1/upload', {
+        const res2 = await fetchWithTimeout('https://tmpfiles.org/api/v1/upload', {
           method: 'POST',
           body: form2
         });
-        if (res2.ok) {
+        if (res2 && res2.ok) {
           const json = await res2.json();
           const rawUrl = json?.data?.url;
           if (rawUrl) {
             return rawUrl.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/');
           }
+        }
+      } catch (e) {}
+
+      try {
+        const form1 = new FormData();
+        form1.append('reqtype', 'fileupload');
+        form1.append('time', '72h');
+        form1.append('fileToUpload', blob, filename);
+        const res1 = await fetchWithTimeout('https://litterbox.catbox.moe/resources/internals/api.php', {
+          method: 'POST',
+          body: form1
+        });
+        if (res1 && res1.ok) {
+          const textUrl = (await res1.text()).trim();
+          if (textUrl.startsWith('http')) return textUrl;
         }
       } catch (e) {}
 
@@ -471,36 +457,17 @@
       const [orders, setOrders] = useState([]);
       const [accountPool, setAccountPool] = useState([]);
       const [promoCodes, setPromoCodes] = useState(DEFAULT_PROMO_CODES);
-      const [storeConfig, setStoreConfig] = useState(() => {
-        try {
-          const cached = JSON.parse(localStorage.getItem('bonka_local_settings') || 'null');
-          if (cached) {
-            return {
-              whatsappNumber: cached.whatsappNumber || DEFAULT_WHATSAPP_NUMBER,
-              storePageUrl: sanitizeMessengerLink(cached.storePageUrl),
-              messengerUrl: sanitizeMessengerLink(cached.messengerUrl || cached.storePageUrl),
-              adminPin: cached.adminPin || DEFAULT_ADMIN_PIN,
-              vfcNumber: cached.vfcNumber || DEFAULT_VFC_NUMBER,
-              vfcRecipient: cached.vfcRecipient || 'Bonka Store',
-              instapayAccount: cached.instapayAccount || DEFAULT_INSTAPAY_ACCOUNT,
-              instapayRecipient: cached.instapayRecipient || 'loaysameh12',
-              teldaAccount: cached.teldaAccount || DEFAULT_TELDA_ACCOUNT,
-              teldaRecipient: cached.teldaRecipient || 'Bonka Store'
-            };
-          }
-        } catch (e) {}
-        return {
-          whatsappNumber: DEFAULT_WHATSAPP_NUMBER,
-          storePageUrl: DEFAULT_FB_MESSENGER_URL,
-          messengerUrl: DEFAULT_FB_MESSENGER_URL,
-          adminPin: DEFAULT_ADMIN_PIN,
-          vfcNumber: DEFAULT_VFC_NUMBER,
-          vfcRecipient: 'Bonka Store',
-          instapayAccount: DEFAULT_INSTAPAY_ACCOUNT,
-          instapayRecipient: 'loaysameh12',
-          teldaAccount: DEFAULT_TELDA_ACCOUNT,
-          teldaRecipient: 'Bonka Store'
-        };
+      const [storeConfig, setStoreConfig] = useState({
+        whatsappNumber: DEFAULT_WHATSAPP_NUMBER,
+        storePageUrl: DEFAULT_FB_MESSENGER_URL,
+        messengerUrl: DEFAULT_FB_MESSENGER_URL,
+        adminPin: DEFAULT_ADMIN_PIN,
+        vfcNumber: DEFAULT_VFC_NUMBER,
+        vfcRecipient: 'Bonka Store',
+        instapayAccount: DEFAULT_INSTAPAY_ACCOUNT,
+        instapayRecipient: 'loaysameh12',
+        teldaAccount: DEFAULT_TELDA_ACCOUNT,
+        teldaRecipient: 'Bonka Store'
       });
       const [loadingData, setLoadingData] = useState(true);
       const [seedingInProgress, setSeedingInProgress] = useState(false);
@@ -600,36 +567,30 @@
         }, 3800);
       };
 
-      // Saves locally, broadcasts across tabs, AND pushes to Cross-Device Cloud Sync (PC <-> Mobile)
-      const syncLocalState = (key, data, pushRemote = true) => {
-        const now = Date.now();
+      const syncLocalState = (key, data) => {
         try {
           localStorage.setItem(`bonka_local_${key}`, JSON.stringify(data));
-          localStorage.setItem(`bonka_ts_${key}`, String(now));
           if (syncChannel) {
-            syncChannel.postMessage({ key, data, timestamp: now });
+            syncChannel.postMessage({ key, data, timestamp: Date.now() });
           }
         } catch (err) {}
-        if (pushRemote && CLOUD_SYNC_KEYS.includes(key)) {
-          pushToCloudSync(key, data);
-        }
       };
 
-      // Listen for Local Tab events + Poll Cross-Device Cloud Sync every 5 seconds so Mobile & PC stay identical
       useEffect(() => {
         const applySyncUpdate = (key, data) => {
-          if (data === null || data === undefined) return;
-          if (key === 'games' && Array.isArray(data)) setGames(data);
-          if (key === 'cart' && Array.isArray(data)) setCart(data);
-          if (key === 'orders' && Array.isArray(data)) setOrders(data);
-          if (key === 'account_pool' && Array.isArray(data)) setAccountPool(data);
-          if (key === 'promo_codes' && Array.isArray(data)) setPromoCodes(data);
-          if (key === 'settings' && typeof data === 'object') {
+          if (!data) return;
+          if (key === 'games') setGames(data);
+          if (key === 'cart') setCart(data);
+          if (key === 'orders') setOrders(data);
+          if (key === 'account_pool') setAccountPool(data);
+          if (key === 'promo_codes') setPromoCodes(data);
+          if (key === 'settings') {
             setStoreConfig((prev) => ({
               ...prev,
               ...data,
-              storePageUrl: sanitizeMessengerLink(data.storePageUrl || prev.storePageUrl),
-              messengerUrl: sanitizeMessengerLink(data.messengerUrl || data.storePageUrl || prev.messengerUrl)
+              whatsappNumber: extractWhatsAppPhone(data.whatsappNumber),
+              storePageUrl: sanitizeMessengerLink(data.storePageUrl),
+              messengerUrl: sanitizeMessengerLink(data.messengerUrl || data.storePageUrl)
             }));
           }
         };
@@ -658,26 +619,7 @@
           }
         }
 
-        // Cross-device cloud sync check (runs on load & every 5 seconds)
-        const syncFromCloud = async () => {
-          for (const key of CLOUD_SYNC_KEYS) {
-            const remote = await pullFromCloudSync(key);
-            if (remote && remote.data !== undefined && remote.updatedAt) {
-              const localTs = Number(localStorage.getItem(`bonka_ts_${key}`) || 0);
-              if (remote.updatedAt > localTs) {
-                localStorage.setItem(`bonka_local_${key}`, JSON.stringify(remote.data));
-                localStorage.setItem(`bonka_ts_${key}`, String(remote.updatedAt));
-                applySyncUpdate(key, remote.data);
-              }
-            }
-          }
-        };
-
-        syncFromCloud();
-        const intervalId = setInterval(syncFromCloud, 5000);
-
         return () => {
-          clearInterval(intervalId);
           window.removeEventListener('storage', handleStorageEvent);
           if (syncChannel) {
             try {
@@ -774,15 +716,12 @@
 
         if (!hasValidFirebase) {
           try {
-            const rawSavedGames = localStorage.getItem('bonka_local_games');
-            if (rawSavedGames !== null) {
-              const parsedGames = JSON.parse(rawSavedGames);
-              if (Array.isArray(parsedGames)) {
-                setGames(parsedGames);
-              }
+            const savedGames = JSON.parse(localStorage.getItem('bonka_local_games') || 'null');
+            if (savedGames && savedGames.length > 0) {
+              setGames(savedGames);
             } else {
               setGames(INITIAL_GAMES_SEED);
-              syncLocalState('games', INITIAL_GAMES_SEED, false);
+              syncLocalState('games', INITIAL_GAMES_SEED);
             }
 
             setCart(JSON.parse(localStorage.getItem('bonka_local_cart') || '[]'));
@@ -793,17 +732,14 @@
               setPromoCodes(savedPromos);
             } else {
               setPromoCodes(DEFAULT_PROMO_CODES);
-              syncLocalState('promo_codes', DEFAULT_PROMO_CODES, false);
+              syncLocalState('promo_codes', DEFAULT_PROMO_CODES);
             }
 
             const savedCfg = JSON.parse(localStorage.getItem('bonka_local_settings') || 'null');
             if (savedCfg) {
-              const cleanWa = (!savedCfg.whatsappNumber || savedCfg.whatsappNumber.includes('wa.me/qr/'))
-                ? DEFAULT_WHATSAPP_NUMBER
-                : savedCfg.whatsappNumber;
               const updatedCfg = {
                 ...savedCfg,
-                whatsappNumber: cleanWa,
+                whatsappNumber: extractWhatsAppPhone(savedCfg.whatsappNumber),
                 storePageUrl: sanitizeMessengerLink(savedCfg.storePageUrl),
                 messengerUrl: sanitizeMessengerLink(savedCfg.messengerUrl || savedCfg.storePageUrl),
                 vfcNumber: savedCfg.vfcNumber || DEFAULT_VFC_NUMBER,
@@ -864,7 +800,7 @@
         const unsubCart = onSnapshot(cartRef, (snapshot) => {
           const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
           setCart(items);
-          syncLocalState('cart', items, false);
+          syncLocalState('cart', items);
         });
 
         const ordersRef = collection(db, 'artifacts', appId, 'public', 'data', 'orders');
@@ -873,7 +809,7 @@
             .map((d) => ({ id: d.id, ...d.data() }))
             .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
           setOrders(loadedOrders);
-          syncLocalState('orders', loadedOrders, false);
+          syncLocalState('orders', loadedOrders);
         });
 
         const vaultRef = collection(db, 'artifacts', appId, 'public', 'data', 'account_pool');
@@ -899,11 +835,8 @@
           if (docSnap.exists()) {
             const data = docSnap.data();
             const cleanMessenger = sanitizeMessengerLink(data.storePageUrl);
-            const cleanWa = (!data.whatsappNumber || data.whatsappNumber === '201000000000' || data.whatsappNumber.includes('wa.me/qr/'))
-              ? DEFAULT_WHATSAPP_NUMBER
-              : data.whatsappNumber;
             const nextConfig = {
-              whatsappNumber: cleanWa,
+              whatsappNumber: extractWhatsAppPhone(data.whatsappNumber),
               storePageUrl: cleanMessenger,
               messengerUrl: sanitizeMessengerLink(data.messengerUrl || cleanMessenger),
               adminPin: data.adminPin && data.adminPin.trim().length >= 6 ? data.adminPin.trim() : DEFAULT_ADMIN_PIN,
@@ -1048,7 +981,7 @@
         );
       };
 
-      // Handle Receipt Image Selection + Automatic Cloud Upload for WhatsApp Link
+      // Instant Receipt Selection + Background Cloud Link Generation
       const handleReceiptFileChange = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -1056,29 +989,31 @@
           showToast(tr('يرجى اختيار ملف صورة صالح (PNG, JPG, WEBP)', 'Please select a valid image file'), 'error');
           return;
         }
-        setUploadingReceipt(true);
         try {
           const { dataUrl, blob } = await compressReceiptImage(file);
+          // Immediately show image & unlock submit button so it never blocks the buyer
           setCheckoutForm((prev) => ({
             ...prev,
             receiptImage: dataUrl,
             receiptFileName: file.name,
             receiptHostedUrl: ''
           }));
+          showToast(tr('تم إرفاق صورة التحويل بنجاح!', 'Transfer screenshot attached!'));
 
-          const hostedUrl = await uploadReceiptToCloud(blob, file.name || 'transfer_receipt.jpg');
-          if (hostedUrl) {
-            setCheckoutForm((prev) => ({
-              ...prev,
-              receiptHostedUrl: hostedUrl
-            }));
-            showToast(tr('تم رفع صورة التحويل وتجهيز رابطها للإرسال في واتساب تلقائياً!', 'Receipt uploaded & link ready for WhatsApp!'));
-          } else {
-            showToast(tr('تم إرفاق صورة التحويل بنجاح!', 'Transfer screenshot attached!'));
+          // Try generating a cloud link in the background (with a 4.5s timeout)
+          if (blob) {
+            setUploadingReceipt(true);
+            uploadReceiptWithTimeout(blob, file.name || 'receipt.jpg')
+              .then((hostedUrl) => {
+                if (hostedUrl) {
+                  setCheckoutForm((prev) => ({ ...prev, receiptHostedUrl: hostedUrl }));
+                }
+              })
+              .catch(() => {})
+              .finally(() => setUploadingReceipt(false));
           }
         } catch (err) {
           showToast(tr('تعذر قراءة الصورة، حاول مرة أخرى', 'Failed to read image'), 'error');
-        } finally {
           setUploadingReceipt(false);
         }
       };
@@ -1100,8 +1035,8 @@
           : '';
 
         const receiptLine = order.receiptHostedUrl
-          ? `📸 *رابط صورة إيصال التحويل:*\n${order.receiptHostedUrl}`
-          : `📸 *صورة التحويل:* مرفقة مع الطلب في الموقع (وسأرسلها لك هنا في الشات أيضاً)`;
+          ? `📸 *رابط صورة إيصال الدفع:*\n${order.receiptHostedUrl}`
+          : `📸 *صورة إيصال الدفع:* تم رفعها في الموقع مع الطلب رقم ${order.orderNumber} (وسأرسل الصورة هنا في الشات أيضاً)`;
 
         return `مرحباً إدارة متجر Bonka Store! 👋
 أريد تأكيد طلبي لألعاب البلايستيشن:
@@ -1120,18 +1055,9 @@ ${itemsLines}
 يرجى تأكيد طلبي وفتح بيانات حساب البلايستيشن (QR Code)!`;
       };
 
-      // Always uses the latest WhatsApp number configured in Admin Settings
       const buildWhatsAppUrl = (order) => {
         const message = buildOrderConfirmationText(order);
-        let latestWaNumber = storeConfig.whatsappNumber;
-        try {
-          const savedCfg = JSON.parse(localStorage.getItem('bonka_local_settings') || 'null');
-          if (savedCfg && savedCfg.whatsappNumber) {
-            latestWaNumber = savedCfg.whatsappNumber;
-          }
-        } catch (e) {}
-        const cleanPhone = extractCleanPhoneNumber(latestWaNumber);
-        return `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`;
+        return getWhatsAppDirectChatUrl(storeConfig.whatsappNumber, message);
       };
 
       const handleConfirmViaMessenger = async (order) => {
@@ -1145,8 +1071,8 @@ ${itemsLines}
         if (!hasValidFirebase) {
           const updated = orders.map(o => o.id === order.id ? { ...o, confirmationMethod: 'Facebook Messenger', customerClickedConfirm: true, status: nextStatus } : o);
           setOrders(updated);
-          syncLocalState('orders', updated, false);
-          showToast(tr(`تم نسخ رسالة الطلب (${order.orderNumber}) ورابط الإيصال! الصقها في ماسنجر.`, `Order ${order.orderNumber} copied & Messenger opened!`));
+          syncLocalState('orders', updated);
+          showToast(tr(`تم نسخ رسالة الطلب (${order.orderNumber})! الصقها وأرسل صورة التحويل في ماسنجر.`, `Order ${order.orderNumber} copied & Messenger opened!`));
           return;
         }
 
@@ -1156,7 +1082,7 @@ ${itemsLines}
             customerClickedConfirm: true,
             status: nextStatus
           });
-          showToast(tr(`تم نسخ رسالة الطلب (${order.orderNumber}) ورابط الإيصال! الصقها في ماسنجر.`, `Order ${order.orderNumber} copied & Messenger opened!`));
+          showToast(tr(`تم نسخ رسالة الطلب (${order.orderNumber})! الصقها وأرسل صورة التحويل في ماسنجر.`, `Order ${order.orderNumber} copied & Messenger opened!`));
         } catch (err) {}
       };
 
@@ -1171,8 +1097,8 @@ ${itemsLines}
         if (!hasValidFirebase) {
           const updated = orders.map(o => o.id === order.id ? { ...o, confirmationMethod: 'WhatsApp', customerClickedConfirm: true, status: nextStatus } : o);
           setOrders(updated);
-          syncLocalState('orders', updated, false);
-          showToast(tr(`تم فتح واتساب على الرقم (${extractCleanPhoneNumber(storeConfig.whatsappNumber)}) مع تفاصيل الطلب!`, `Opened WhatsApp with order ${order.orderNumber}!`));
+          syncLocalState('orders', updated);
+          showToast(tr(`تم فتح واتساب مع تفاصيل الطلب رقم ${order.orderNumber}!`, `Opened WhatsApp with order ${order.orderNumber}!`));
           return;
         }
 
@@ -1182,7 +1108,7 @@ ${itemsLines}
             customerClickedConfirm: true,
             status: nextStatus
           });
-          showToast(tr(`تم فتح واتساب على الرقم (${extractCleanPhoneNumber(storeConfig.whatsappNumber)}) مع تفاصيل الطلب!`, `Opened WhatsApp with order ${order.orderNumber}!`));
+          showToast(tr(`تم فتح واتساب مع تفاصيل الطلب رقم ${order.orderNumber}!`, `Opened WhatsApp with order ${order.orderNumber}!`));
         } catch (err) {}
       };
 
@@ -1195,7 +1121,7 @@ ${itemsLines}
           confirmedAt: Date.now()
         } : o);
         setOrders(updated);
-        syncLocalState('orders', updated, false);
+        syncLocalState('orders', updated);
 
         if (!hasValidFirebase) {
           showToast(tr(`تم تأكيد الطلب ${order.orderNumber} وفتح بيانات الحساب للعميل ${order.customerName}!`, `Order ${order.orderNumber} confirmed and unlocked for ${order.customerName}!`));
@@ -1220,9 +1146,8 @@ ${itemsLines}
           return;
         }
         const normalizedUrl = sanitizeMessengerLink(storeConfig.storePageUrl.trim());
-        const cleanWaPhone = extractCleanPhoneNumber(storeConfig.whatsappNumber);
         const nextCfg = {
-          whatsappNumber: cleanWaPhone,
+          whatsappNumber: extractWhatsAppPhone(storeConfig.whatsappNumber),
           storePageUrl: normalizedUrl,
           messengerUrl: normalizedUrl,
           adminPin: storeConfig.adminPin.trim(),
@@ -1236,16 +1161,16 @@ ${itemsLines}
         };
 
         setStoreConfig(prev => ({ ...prev, ...nextCfg }));
-        syncLocalState('settings', nextCfg, true);
+        syncLocalState('settings', nextCfg);
 
         if (!hasValidFirebase) {
-          showToast(tr(`تم حفظ رقم الواتساب (${cleanWaPhone}) وأرقام الدفع ومزامنتها على الموبايل والكمبيوتر!`, "Settings saved & synced across PC and Mobile!"));
+          showToast(tr("تم حفظ أرقام الدفع والروابط والإعدادات بنجاح!", "Payment numbers, links & settings saved!"));
           return;
         }
 
         try {
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'store_settings', 'config'), nextCfg);
-          showToast(tr(`تم حفظ رقم الواتساب (${cleanWaPhone}) وأرقام الدفع ومزامنتها على الموبايل والكمبيوتر!`, "Settings saved & synced across PC and Mobile!"));
+          showToast(tr("تم حفظ أرقام الدفع والروابط والإعدادات بنجاح!", "Payment numbers, links & settings saved!"));
         } catch (err) {}
       };
 
@@ -1268,24 +1193,24 @@ ${itemsLines}
         };
         const updated = [newPromo, ...promoCodes.filter(p => p.code.toUpperCase() !== cleanCode)];
         setPromoCodes(updated);
-        syncLocalState('promo_codes', updated, true);
+        syncLocalState('promo_codes', updated);
         setNewPromoForm({ code: '', discountType: 'percent', discountValue: 10 });
 
         if (!hasValidFirebase) {
-          showToast(tr(`تم إضافة كود الخصم ${cleanCode} ومزامنته على جميع الأجهزة!`, `Added promo code ${cleanCode}!`));
+          showToast(tr(`تم إضافة كود الخصم ${cleanCode} بنجاح!`, `Added promo code ${cleanCode}!`));
           return;
         }
 
         try {
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promo_codes', newPromo.id), newPromo);
-          showToast(tr(`تم إضافة كود الخصم ${cleanCode} ومزامنته على جميع الأجهزة!`, `Added promo code ${cleanCode}!`));
+          showToast(tr(`تم إضافة كود الخصم ${cleanCode} بنجاح!`, `Added promo code ${cleanCode}!`));
         } catch (err) {}
       };
 
       const handleDeletePromoCode = async (promo) => {
         const updated = promoCodes.filter(p => p.id !== promo.id);
         setPromoCodes(updated);
-        syncLocalState('promo_codes', updated, true);
+        syncLocalState('promo_codes', updated);
         if (appliedPromo?.id === promo.id) setAppliedPromo(null);
 
         if (!hasValidFirebase) {
@@ -1361,7 +1286,7 @@ ${itemsLines}
           }];
         }
         setCart(updatedCart);
-        syncLocalState('cart', updatedCart, false);
+        syncLocalState('cart', updatedCart);
 
         if (!hasValidFirebase) {
           showToast(tr(`تمت إضافة ${game.title} إلى السلة!`, `Added ${game.title} to cart!`));
@@ -1398,7 +1323,7 @@ ${itemsLines}
           ? cart.filter(i => i.id !== cartItem.id)
           : cart.map(i => i.id === cartItem.id ? { ...i, quantity: newQty } : i);
         setCart(updated);
-        syncLocalState('cart', updated, false);
+        syncLocalState('cart', updated);
 
         if (!hasValidFirebase) return;
 
@@ -1416,7 +1341,7 @@ ${itemsLines}
         if (!user) return;
         const updated = cart.filter(i => i.id !== cartItemId);
         setCart(updated);
-        syncLocalState('cart', updated, false);
+        syncLocalState('cart', updated);
 
         if (!hasValidFirebase) {
           showToast(tr("تم حذف اللعبة من السلة", "Removed game from cart"), "info");
@@ -1435,13 +1360,13 @@ ${itemsLines}
         const nextCart = cart.filter(c => c.gameId !== gameId);
         setGames(nextGames);
         setCart(nextCart);
-        syncLocalState('games', nextGames, true);
-        syncLocalState('cart', nextCart, false);
+        syncLocalState('games', nextGames);
+        syncLocalState('cart', nextCart);
         setGameToDeleteModal(null);
         if (selectedGameModal?.id === gameId) setSelectedGameModal(null);
 
         if (!hasValidFirebase) {
-          showToast(tr(`تم حذف لعبة "${title}" ومزامنة الحذف على الموبايل والكمبيوتر!`, `Removed "${title}" across all devices.`), 'info');
+          showToast(tr(`تم حذف لعبة "${title}" من المتجر نهائياً.`, `Removed "${title}" from the store.`), 'info');
           return;
         }
 
@@ -1451,7 +1376,7 @@ ${itemsLines}
           for (const cItem of matchingCartItems) {
             await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'cart', cItem.id));
           }
-          showToast(tr(`تم حذف لعبة "${title}" ومزامنة الحذف على الموبايل والكمبيوتر!`, `Removed "${title}" across all devices.`), 'info');
+          showToast(tr(`تم حذف لعبة "${title}" من المتجر نهائياً.`, `Removed "${title}" from the store.`), 'info');
         } catch (err) {}
       };
 
@@ -1575,7 +1500,7 @@ ${itemsLines}
           const localOrder = { id: 'ord_' + Date.now(), ...newOrderData };
           const nextOrders = [localOrder, ...orders];
           setOrders(nextOrders);
-          syncLocalState('orders', nextOrders, false);
+          syncLocalState('orders', nextOrders);
 
           const nextPool = accountPool.map(acc => usedPoolIds.has(acc.id) ? {
             ...acc,
@@ -1585,7 +1510,7 @@ ${itemsLines}
             assignedAt: Date.now()
           } : acc);
           setAccountPool(nextPool);
-          syncLocalState('account_pool', nextPool, true);
+          syncLocalState('account_pool', nextPool);
 
           const nextGames = games.map(g => {
             const cartItemPrimary = cart.find(c => c.gameId === g.id && c.licenseType === 'Primary');
@@ -1597,24 +1522,23 @@ ${itemsLines}
             };
           });
           setGames(nextGames);
-          syncLocalState('games', nextGames, true);
+          syncLocalState('games', nextGames);
 
           setCart([]);
-          syncLocalState('cart', [], false);
+          syncLocalState('cart', []);
           setAppliedPromo(null);
           setPromoInput('');
           setCheckoutForm(prev => ({ ...prev, receiptImage: '', receiptHostedUrl: '', receiptFileName: '' }));
 
-          // Automatically open WhatsApp to the latest configured admin number!
-          const waUrl = buildWhatsAppUrl(localOrder);
-          window.open(waUrl, '_blank', 'noopener,noreferrer');
+          // Copy full order text to clipboard right away
+          copyTextToClipboard(buildOrderConfirmationText(localOrder), `order_copy_${localOrder.id}`);
 
           if (!hasValidFirebase) {
             setCheckoutModalOpen(false);
             setCartOpen(false);
             setActiveTab('orders');
             setPostOrderModal(localOrder);
-            showToast(tr(`تم تسجيل طلبك ${orderNumber} وفتح واتساب مع رقم الطلب ورابط الإيصال!`, `Order ${orderNumber} created & WhatsApp opened!`));
+            showToast(tr(`تم تسجيل طلبك ${orderNumber}! اضغط الآن على زر واتساب لإرسال الطلب والإيصال.`, `Order ${orderNumber} created! Click WhatsApp to send.`));
             return;
           }
 
@@ -1628,7 +1552,7 @@ ${itemsLines}
           setCartOpen(false);
           setActiveTab('orders');
           setPostOrderModal({ id: orderDocRef.id, ...newOrderData });
-          showToast(tr(`تم تسجيل طلبك ${orderNumber} وفتح واتساب مع رقم الطلب ورابط الإيصال!`, `Order ${orderNumber} created & WhatsApp opened!`));
+          showToast(tr(`تم تسجيل طلبك ${orderNumber}! اضغط الآن على زر واتساب لإرسال الطلب والإيصال.`, `Order ${orderNumber} created! Click WhatsApp to send.`));
         } catch (err) {
           showToast(tr("حدث خطأ أثناء إتمام الطلب.", "Error completing order."), "error");
         } finally {
@@ -1707,7 +1631,7 @@ ${itemsLines}
           nextGames = [newGame, ...games];
         }
         setGames(nextGames);
-        syncLocalState('games', nextGames, true);
+        syncLocalState('games', nextGames);
 
         const updatedCart = cart.map((cItem) => {
           if (cItem.gameId !== targetId) return cItem;
@@ -1721,10 +1645,10 @@ ${itemsLines}
           };
         });
         setCart(updatedCart);
-        syncLocalState('cart', updatedCart, false);
+        syncLocalState('cart', updatedCart);
 
         if (!hasValidFirebase) {
-          showToast(tr(`تم حفظ اللعبة ومزامنتها على الموبايل والكمبيوتر!`, `Game saved & synced!`));
+          showToast(tr(`تم حفظ اللعبة بنجاح!`, `Game saved successfully!`));
           resetGameForm();
           setAdminSubTab('inventory');
           return;
@@ -1739,7 +1663,7 @@ ${itemsLines}
               createdAt: Date.now()
             });
           }
-          showToast(tr(`تم حفظ اللعبة ومزامنتها على الموبايل والكمبيوتر!`, `Game saved & synced!`));
+          showToast(tr(`تم حفظ اللعبة بنجاح!`, `Game saved successfully!`));
           resetGameForm();
           setAdminSubTab('inventory');
         } catch (err) {}
@@ -1766,12 +1690,12 @@ ${itemsLines}
 
         const nextPool = [{ id: 'vault_' + Date.now(), ...newAcc }, ...accountPool];
         setAccountPool(nextPool);
-        syncLocalState('account_pool', nextPool, true);
+        syncLocalState('account_pool', nextPool);
 
         const stockField = vaultForm.licenseType === 'Primary' ? 'primaryStock' : 'secondaryStock';
         const nextGames = games.map(g => g.id === targetGame.id ? { ...g, [stockField]: (Number(g[stockField]) || 0) + 1 } : g);
         setGames(nextGames);
-        syncLocalState('games', nextGames, true);
+        syncLocalState('games', nextGames);
 
         if (!hasValidFirebase) {
           setVaultForm((prev) => ({ ...prev, psnEmail: '', psnPassword: '', twoStepCode: '', notes: '' }));
@@ -1794,7 +1718,7 @@ ${itemsLines}
         if (!user || !acc?.id) return;
         const nextPool = accountPool.filter(a => a.id !== acc.id);
         setAccountPool(nextPool);
-        syncLocalState('account_pool', nextPool, true);
+        syncLocalState('account_pool', nextPool);
 
         if (!hasValidFirebase) {
           showToast(tr("تم حذف الحساب من الخزنة.", "Removed account from vault."), "info");
@@ -1838,7 +1762,7 @@ ${itemsLines}
           confirmedAt: Date.now()
         } : o);
         setOrders(nextOrders);
-        syncLocalState('orders', nextOrders, false);
+        syncLocalState('orders', nextOrders);
 
         if (!hasValidFirebase) {
           setManagingOrderModal(null);
@@ -1898,7 +1822,7 @@ ${itemsLines}
       }, [orders, user]);
 
       const activeMessengerHref = sanitizeMessengerLink(storeConfig.storePageUrl || DEFAULT_FB_MESSENGER_URL);
-      const activeWhatsAppHref = getWhatsAppBaseUrl(storeConfig.whatsappNumber);
+      const activeWhatsAppHref = getWhatsAppDirectChatUrl(storeConfig.whatsappNumber);
 
       return (
         <div
@@ -2518,4 +2442,4 @@ ${itemsLines}
                                   <p className="text-xs text-slate-300">
                                     {tr('اضغط على واتساب أو ماسنجر لإرسال رقم الطلب ورابط صورة التحويل للإدارة واستلام الـ QR Code فوراً.', 'Confirm via WhatsApp or Messenger to receive your QR Code.')}
                                   </p>
-                                  <div class
+                                  <div className="
