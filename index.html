@@ -769,20 +769,7 @@ const [checkoutForm, setCheckoutForm] = useState({
 📦 *الألعاب المطلوبة:*
 ${itemsLines}
 
-يرجى تأكيد طلبي وفتح بيانات حساب البلايستيشن (الإيميل والرقم السري)!`
-    : `Hello Bonka Store Admin! 👋
-I would like to confirm my PlayStation order:
-
-🧾 *Order ID:* ${order.orderNumber}
-👤 *Full Name:* ${order.customerName}
-📱 *WhatsApp:* ${order.whatsappNumber || 'N/A'}
-💳 *Payment Method:* Vodafone Cash / InstaPay
-💰 *Total Paid:* ${formatEGP(order.totalAmount, 'en')}
-
-📦 *Ordered Games:*
-${itemsLines}
-
-Please confirm my order and unlock my PSN account credentials!`;
+يرجى تأكيد طلبي وفتح بيانات حساب البلايستيشن (QR Code)!`
 
   const cleanPhone = formatWhatsAppPhone(storeConfig.whatsappNumber);
   return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
