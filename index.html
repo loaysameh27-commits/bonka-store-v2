@@ -33,7 +33,7 @@
       border-radius: 9999px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: #3b82f6;
+      background: #06b6d4;
     }
   </style>
 
@@ -58,7 +58,7 @@
   <div id="root"></div>
 
   <script type="text/babel" data-type="module">
-    import React, { useState, useEffect, useMemo } from 'react';
+    import React, { useState, useEffect, useMemo, useRef } from 'react';
     import { createRoot } from 'react-dom/client';
     import { initializeApp } from 'firebase/app';
     import { 
@@ -80,11 +80,11 @@
     import { 
       Gamepad2, ShoppingCart, ShieldCheck, KeyRound, Search, Filter, 
       Sparkles, CheckCircle2, AlertCircle, Trash2, Plus, Edit3, 
-      Package, CreditCard, ChevronRight, X, Info, Award, Zap, 
+      Package, CreditCard, ChevronRight, ChevronDown, X, Info, Award, Zap, 
       Copy, Check, Terminal, RefreshCw, Layers, Eye, Lock, Globe,
       Wifi, WifiOff, Trophy, UserCheck, Flame, SlidersHorizontal, ArrowUpRight,
       MessageCircle, Send, PhoneCall, Clock, Unlock, CheckCheck, ExternalLink,
-      Smartphone, Monitor, User
+      Smartphone, Monitor, User, Upload, Image as ImageIcon, Tag, Wallet
     } from 'lucide-react';
 
     let firebaseConfig = {};
@@ -284,6 +284,11 @@
       }
     ];
 
+    const DEFAULT_PROMO_CODES = [
+      { id: 'promo_bonka10', code: 'BONKA10', discountType: 'percent', discountValue: 10, active: true },
+      { id: 'promo_welcome100', code: 'WELCOME100', discountType: 'fixed', discountValue: 100, active: true }
+    ];
+
     const normalizeEgpPrice = (val, fallback = 950) => {
       const num = Number(val);
       if (!num || isNaN(num)) return fallback;
@@ -292,7 +297,7 @@
     };
 
     const formatEGP = (val, lang = 'ar') => {
-      const amount = normalizeEgpPrice(val, 0);
+      const amount = Math.max(0, Math.round(Number(val) || 0));
       if (lang === 'en') {
         return `${amount.toLocaleString('en-US')} EGP`;
       }
@@ -303,6 +308,10 @@
     const DEFAULT_WHATSAPP_LINK = 'https://wa.me/qr/P5JRG2C3PYVYP1';
     const DEFAULT_ADMIN_PIN = 'BNK#9920$X';
     const SECRET_SEARCH_TRIGGER = '//bnk-root';
+
+    const DEFAULT_VFC_NUMBER = '01205047037';
+    const DEFAULT_INSTAPAY_ACCOUNT = 'https://ipn.eg/S/loaysameh12/instapay/5DaPYm';
+    const DEFAULT_TELDA_ACCOUNT = '01205047037';
 
     const sanitizeMessengerLink = (url) => {
       if (!url || url.includes('61563495661407') || url === 'https://m.me/psvaultstore') {
@@ -325,12 +334,31 @@
       return DEFAULT_WHATSAPP_LINK;
     };
 
+    // Compress uploaded receipt image to store cleanly in Firestore / LocalStorage
+    const compressReceiptImage = (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const MAX_WIDTH = 850;
+            const scale = img.width > MAX_WIDTH ? MAX_WIDTH / img.width : 1;
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', 0.72));
+          };
+          img.onerror = reject;
+          img.src = event.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    };
+
     const generateVaultCredentials = (gameTitle, licenseType) => {
-      const cleanSlug = gameTitle
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '')
-        .slice(0, 10);
-      const randomDigits = Math.floor(1000 + Math.random() * 9000);
       const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
       let pass = "PSN#";
       for (let i = 0; i < 8; i++) {
@@ -354,11 +382,18 @@
       const [cart, setCart] = useState([]);
       const [orders, setOrders] = useState([]);
       const [accountPool, setAccountPool] = useState([]);
+      const [promoCodes, setPromoCodes] = useState(DEFAULT_PROMO_CODES);
       const [storeConfig, setStoreConfig] = useState({
         whatsappNumber: DEFAULT_WHATSAPP_LINK,
         storePageUrl: DEFAULT_FB_MESSENGER_URL,
         messengerUrl: DEFAULT_FB_MESSENGER_URL,
-        adminPin: DEFAULT_ADMIN_PIN
+        adminPin: DEFAULT_ADMIN_PIN,
+        vfcNumber: DEFAULT_VFC_NUMBER,
+        vfcRecipient: 'Bonka Store',
+        instapayAccount: DEFAULT_INSTAPAY_ACCOUNT,
+        instapayRecipient: 'loaysameh12',
+        teldaAccount: DEFAULT_TELDA_ACCOUNT,
+        teldaRecipient: 'Bonka Store'
       });
       const [loadingData, setLoadingData] = useState(true);
       const [seedingInProgress, setSeedingInProgress] = useState(false);
@@ -379,7 +414,6 @@
       const [adminPinInput, setAdminPinInput] = useState('');
       const [failedPinAttempts, setFailedPinAttempts] = useState(0);
       const [lockoutUntil, setLockoutUntil] = useState(0);
-      const [legalModal, setLegalModal] = useState(null);
       const isCustomerViewOnly = !isAdminAuthenticated;
 
       const [activeTab, setActiveTab] = useState('store');
@@ -388,8 +422,26 @@
       const [postOrderModal, setPostOrderModal] = useState(null);
       const [selectedGameModal, setSelectedGameModal] = useState(null);
       const [gameToDeleteModal, setGameToDeleteModal] = useState(null);
+      const [receiptPreviewModal, setReceiptPreviewModal] = useState(null);
       const [toast, setToast] = useState(null);
       const [copiedId, setCopiedId] = useState(null);
+
+      // Cart Payment & Promo states
+      const [paymentDropdownOpen, setPaymentDropdownOpen] = useState(false);
+      const [promoInput, setPromoInput] = useState('');
+      const [appliedPromo, setAppliedPromo] = useState(null);
+
+      // Checkout Form + Receipt Image
+      const [checkoutForm, setCheckoutForm] = useState({
+        customerName: '',
+        whatsappNumber: '',
+        paymentMethod: 'instapay',
+        receiptImage: '',
+        receiptFileName: '',
+        agreedToRules: true
+      });
+      const [submittingOrder, setSubmittingOrder] = useState(false);
+      const fileInputRef = useRef(null);
 
       const [searchQuery, setSearchQuery] = useState('');
       const [consoleFilter, setConsoleFilter] = useState('ALL');
@@ -398,16 +450,13 @@
       const [cardLicenseSelections, setCardLicenseSelections] = useState({});
       const [sortBy, setSortBy] = useState('featured');
 
-      const [checkoutForm, setCheckoutForm] = useState({
-        customerName: '',
-        whatsappNumber: '',
-        paymentMethod: 'vodafone_instapay',
-        agreedToRules: false
-      });
-      const [submittingOrder, setSubmittingOrder] = useState(false);
-
       const [adminSubTab, setAdminSubTab] = useState('inventory');
       const [editingGameId, setEditingGameId] = useState(null);
+      const [newPromoForm, setNewPromoForm] = useState({
+        code: '',
+        discountType: 'percent',
+        discountValue: 10
+      });
       const [vaultForm, setVaultForm] = useState({
         gameId: '',
         licenseType: 'Primary',
@@ -458,6 +507,7 @@
           if (key === 'cart') setCart(data);
           if (key === 'orders') setOrders(data);
           if (key === 'account_pool') setAccountPool(data);
+          if (key === 'promo_codes') setPromoCodes(data);
           if (key === 'settings') {
             setStoreConfig((prev) => ({
               ...prev,
@@ -600,12 +650,23 @@
             setCart(JSON.parse(localStorage.getItem('bonka_local_cart') || '[]'));
             setOrders(JSON.parse(localStorage.getItem('bonka_local_orders') || '[]'));
             setAccountPool(JSON.parse(localStorage.getItem('bonka_local_account_pool') || '[]'));
+            const savedPromos = JSON.parse(localStorage.getItem('bonka_local_promo_codes') || 'null');
+            if (savedPromos && Array.isArray(savedPromos)) {
+              setPromoCodes(savedPromos);
+            } else {
+              setPromoCodes(DEFAULT_PROMO_CODES);
+              syncLocalState('promo_codes', DEFAULT_PROMO_CODES);
+            }
+
             const savedCfg = JSON.parse(localStorage.getItem('bonka_local_settings') || 'null');
             if (savedCfg) {
               const updatedCfg = {
                 ...savedCfg,
                 storePageUrl: sanitizeMessengerLink(savedCfg.storePageUrl),
-                messengerUrl: sanitizeMessengerLink(savedCfg.messengerUrl || savedCfg.storePageUrl)
+                messengerUrl: sanitizeMessengerLink(savedCfg.messengerUrl || savedCfg.storePageUrl),
+                vfcNumber: savedCfg.vfcNumber || DEFAULT_VFC_NUMBER,
+                instapayAccount: savedCfg.instapayAccount || DEFAULT_INSTAPAY_ACCOUNT,
+                teldaAccount: savedCfg.teldaAccount || DEFAULT_TELDA_ACCOUNT
               };
               setStoreConfig((prev) => ({ ...prev, ...updatedCfg }));
               localStorage.setItem('bonka_local_settings', JSON.stringify(updatedCfg));
@@ -682,16 +743,31 @@
           syncLocalState('account_pool', loadedPool);
         });
 
+        const promoRef = collection(db, 'artifacts', appId, 'public', 'data', 'promo_codes');
+        const unsubPromos = onSnapshot(promoRef, (snapshot) => {
+          const loadedPromos = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          if (loadedPromos.length > 0) {
+            setPromoCodes(loadedPromos);
+            syncLocalState('promo_codes', loadedPromos);
+          }
+        });
+
         const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'store_settings', 'config');
         const unsubSettings = onSnapshot(settingsRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
             const cleanMessenger = sanitizeMessengerLink(data.storePageUrl);
             const nextConfig = {
-              whatsappNumber: !data.whatsappNumber || data.whatsappNumber.includes('201205047037') || data.whatsappNumber === '201000000000' ? DEFAULT_WHATSAPP_LINK : data.whatsappNumber,
+              whatsappNumber: !data.whatsappNumber || data.whatsappNumber === '201000000000' ? DEFAULT_WHATSAPP_LINK : data.whatsappNumber,
               storePageUrl: cleanMessenger,
               messengerUrl: sanitizeMessengerLink(data.messengerUrl || cleanMessenger),
-              adminPin: data.adminPin && data.adminPin.trim().length >= 6 ? data.adminPin.trim() : DEFAULT_ADMIN_PIN
+              adminPin: data.adminPin && data.adminPin.trim().length >= 6 ? data.adminPin.trim() : DEFAULT_ADMIN_PIN,
+              vfcNumber: data.vfcNumber || DEFAULT_VFC_NUMBER,
+              vfcRecipient: data.vfcRecipient || 'Bonka Store',
+              instapayAccount: data.instapayAccount || DEFAULT_INSTAPAY_ACCOUNT,
+              instapayRecipient: data.instapayRecipient || 'loaysameh12',
+              teldaAccount: data.teldaAccount || DEFAULT_TELDA_ACCOUNT,
+              teldaRecipient: data.teldaRecipient || 'Bonka Store'
             };
             setStoreConfig((prev) => ({ ...prev, ...data, ...nextConfig }));
             syncLocalState('settings', nextConfig);
@@ -703,6 +779,7 @@
           unsubCart();
           unsubOrders();
           unsubVault();
+          unsubPromos();
           unsubSettings();
         };
       }, [authReady, user]);
@@ -714,7 +791,140 @@
         }
       }, [games]);
 
-      // WhatsApp Message (Arabic only + QR Code wording)
+      // Payment Methods Configuration
+      const paymentMethodsList = useMemo(() => [
+        {
+          id: 'vodafone_cash',
+          titleAr: 'فودافون كاش (Vodafone Cash)',
+          titleEn: 'Vodafone Cash Wallet',
+          shortAr: 'محفظة كاش',
+          shortEn: 'Cash Wallet',
+          dotColor: 'bg-amber-400',
+          borderColor: 'border-amber-500/40',
+          textColor: 'text-amber-400',
+          transferValue: storeConfig.vfcNumber || DEFAULT_VFC_NUMBER,
+          recipientName: storeConfig.vfcRecipient || 'Bonka Store',
+          isUrl: (storeConfig.vfcNumber || '').startsWith('http')
+        },
+        {
+          id: 'instapay',
+          titleAr: 'إنستاباي (InstaPay)',
+          titleEn: 'InstaPay',
+          shortAr: 'إنستاباي',
+          shortEn: 'InstaPay',
+          dotColor: 'bg-cyan-400',
+          borderColor: 'border-cyan-500/40',
+          textColor: 'text-cyan-400',
+          transferValue: storeConfig.instapayAccount || DEFAULT_INSTAPAY_ACCOUNT,
+          recipientName: storeConfig.instapayRecipient || 'loaysameh12',
+          isUrl: (storeConfig.instapayAccount || DEFAULT_INSTAPAY_ACCOUNT).startsWith('http')
+        },
+        {
+          id: 'telda',
+          titleAr: 'تيلدا (Telda)',
+          titleEn: 'Telda',
+          shortAr: 'تيلدا',
+          shortEn: 'Telda',
+          dotColor: 'bg-purple-400',
+          borderColor: 'border-purple-500/40',
+          textColor: 'text-purple-400',
+          transferValue: storeConfig.teldaAccount || DEFAULT_TELDA_ACCOUNT,
+          recipientName: storeConfig.teldaRecipient || 'Bonka Store',
+          isUrl: (storeConfig.teldaAccount || '').startsWith('http')
+        }
+      ], [storeConfig]);
+
+      const selectedPaymentObj = useMemo(() => {
+        return paymentMethodsList.find(m => m.id === checkoutForm.paymentMethod) || paymentMethodsList[1];
+      }, [paymentMethodsList, checkoutForm.paymentMethod]);
+
+      const getPaymentMethodLabel = (methodId) => {
+        const found = paymentMethodsList.find(m => m.id === methodId);
+        return found ? found.titleAr : 'فودافون كاش / إنستا باي';
+      };
+
+      // Cart Totals + Promo Calculation
+      const cartTotals = useMemo(() => {
+        let subtotal = 0;
+        let retailTotal = 0;
+        let count = 0;
+        cart.forEach((item) => {
+          const liveGame = games.find((g) => g.id === item.gameId);
+          const qty = Number(item.quantity) || 1;
+          const price = liveGame
+            ? (item.licenseType === 'Primary' ? normalizeEgpPrice(liveGame.primaryPrice, 1100) : normalizeEgpPrice(liveGame.secondaryPrice, 650))
+            : normalizeEgpPrice(item.price, 750);
+          const retail = liveGame
+            ? normalizeEgpPrice(liveGame.retailPrice, 3200)
+            : normalizeEgpPrice(item.retailPrice, 3200);
+          subtotal += price * qty;
+          retailTotal += retail * qty;
+          count += qty;
+        });
+
+        let promoDiscount = 0;
+        if (appliedPromo && subtotal > 0) {
+          if (appliedPromo.discountType === 'percent') {
+            promoDiscount = Math.round((subtotal * Number(appliedPromo.discountValue)) / 100);
+          } else {
+            promoDiscount = Math.min(subtotal, Number(appliedPromo.discountValue) || 0);
+          }
+        }
+
+        const finalTotal = Math.max(0, subtotal - promoDiscount);
+
+        return {
+          subtotal,
+          retailTotal,
+          promoDiscount,
+          finalTotal,
+          totalSavings: Math.max(0, retailTotal - finalTotal),
+          count
+        };
+      }, [cart, games, appliedPromo]);
+
+      const handleApplyPromoCode = () => {
+        const clean = promoInput.trim().toUpperCase();
+        if (!clean) {
+          showToast(tr('أدخل كود الخصم أولاً', 'Enter a promo code first'), 'error');
+          return;
+        }
+        const match = promoCodes.find(p => p.code.toUpperCase() === clean && p.active !== false);
+        if (!match) {
+          showToast(tr('كود الخصم غير صحيح أو منتهي الصلاحية!', 'Invalid or expired promo code!'), 'error');
+          return;
+        }
+        setAppliedPromo(match);
+        showToast(
+          tr(
+            `تم تفعيل كود الخصم ${match.code} بنجاح!`,
+            `Promo code ${match.code} applied!`
+          )
+        );
+      };
+
+      // Handle Receipt Image Upload
+      const handleReceiptFileChange = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+          showToast(tr('يرجى اختيار ملف صورة صالح (PNG, JPG, WEBP)', 'Please select a valid image file'), 'error');
+          return;
+        }
+        try {
+          const compressedDataUrl = await compressReceiptImage(file);
+          setCheckoutForm((prev) => ({
+            ...prev,
+            receiptImage: compressedDataUrl,
+            receiptFileName: file.name
+          }));
+          showToast(tr('تم إرفاق صورة تأكيد التحويل بنجاح!', 'Transfer confirmation photo attached!'));
+        } catch (err) {
+          showToast(tr('تعذر قراءة الصورة، حاول مرة أخرى', 'Failed to read image'), 'error');
+        }
+      };
+
+      // WhatsApp Message Builder
       const buildWhatsAppUrl = (order) => {
         let parsedItems = [];
         try {
@@ -726,14 +936,19 @@
           .map((item, idx) => `${idx + 1}. ${item.title} (${item.console} - ${item.licenseType === 'Primary' ? 'نسخة أساسي Primary' : 'نسخة ثانوي Secondary'}) - ${formatEGP(item.pricePaid, 'ar')}`)
           .join('\n');
 
+        const promoLine = order.promoCode
+          ? `🏷️ *كود الخصم:* ${order.promoCode} (-${formatEGP(order.discountAmount || 0, 'ar')})\n`
+          : '';
+
         const message = `مرحباً إدارة متجر Bonka Store! 👋
 أريد تأكيد طلبي لألعاب البلايستيشن:
 
 🧾 *رقم الطلب:* ${order.orderNumber}
-👤 *الاسم الثلاثي:* ${order.customerName}
+👤 *الاسم الكامل:* ${order.customerName}
 📱 *رقم الواتساب:* ${order.whatsappNumber || 'غير مسجل'}
-💳 *طريقة الدفع:* فودافون كاش / إنستا باي
-💰 *الإجمالي المطلوب:* ${formatEGP(order.totalAmount, 'ar')}
+💳 *طريقة الدفع:* ${getPaymentMethodLabel(order.paymentMethod)}
+${promoLine}💰 *الإجمالي المدفوع:* ${formatEGP(order.totalAmount, 'ar')}
+📸 *صورة التحويل:* تم رفعها في الطلب (وسأرسلها لك هنا في الشات أيضاً للتأكيد)
 
 📦 *الألعاب المطلوبة:*
 ${itemsLines}
@@ -747,7 +962,7 @@ ${itemsLines}
 
       const handleConfirmViaMessenger = async (order) => {
         copyTextToClipboard(
-          `مرحباً! أريد تأكيد طلبي رقم ${order.orderNumber} باسم ${order.customerName} بمبلغ ${formatEGP(order.totalAmount, 'ar')} واستلام الـ QR Code`,
+          `مرحباً! أريد تأكيد طلبي رقم ${order.orderNumber} باسم ${order.customerName} (${getPaymentMethodLabel(order.paymentMethod)}) بمبلغ ${formatEGP(order.totalAmount, 'ar')} واستلام الـ QR Code. مرفق صورة التحويل.`,
           `fb_order_${order.id}`
         );
         const targetMessengerUrl = sanitizeMessengerLink(storeConfig.storePageUrl || DEFAULT_FB_MESSENGER_URL);
@@ -759,7 +974,7 @@ ${itemsLines}
           const updated = orders.map(o => o.id === order.id ? { ...o, confirmationMethod: 'Facebook Messenger', customerClickedConfirm: true, status: nextStatus } : o);
           setOrders(updated);
           syncLocalState('orders', updated);
-          showToast(tr(`تم نسخ تفاصيل الطلب ${order.orderNumber} وفتح ماسنجر للمراسلة!`, `Order ${order.orderNumber} copied & Messenger opened!`));
+          showToast(tr(`تم نسخ تفاصيل الطلب ${order.orderNumber} وفتح ماسنجر! أرسل صورة التحويل هناك.`, `Order ${order.orderNumber} copied & Messenger opened!`));
           return;
         }
 
@@ -769,7 +984,7 @@ ${itemsLines}
             customerClickedConfirm: true,
             status: nextStatus
           });
-          showToast(tr(`تم نسخ تفاصيل الطلب ${order.orderNumber} وفتح ماسنجر للمراسلة!`, `Order ${order.orderNumber} copied & Messenger opened!`));
+          showToast(tr(`تم نسخ تفاصيل الطلب ${order.orderNumber} وفتح ماسنجر! أرسل صورة التحويل هناك.`, `Order ${order.orderNumber} copied & Messenger opened!`));
         } catch (err) {}
       };
 
@@ -783,7 +998,7 @@ ${itemsLines}
           const updated = orders.map(o => o.id === order.id ? { ...o, confirmationMethod: 'WhatsApp', customerClickedConfirm: true, status: nextStatus } : o);
           setOrders(updated);
           syncLocalState('orders', updated);
-          showToast(tr(`تم فتح رابط واتساب للطلب ${order.orderNumber}!`, `Opened WhatsApp link for order ${order.orderNumber}!`));
+          showToast(tr(`تم فتح واتساب للطلب ${order.orderNumber}!`, `Opened WhatsApp link for order ${order.orderNumber}!`));
           return;
         }
 
@@ -793,7 +1008,7 @@ ${itemsLines}
             customerClickedConfirm: true,
             status: nextStatus
           });
-          showToast(tr(`تم فتح رابط واتساب للطلب ${order.orderNumber}!`, `Opened WhatsApp link for order ${order.orderNumber}!`));
+          showToast(tr(`تم فتح واتساب للطلب ${order.orderNumber}!`, `Opened WhatsApp link for order ${order.orderNumber}!`));
         } catch (err) {}
       };
 
@@ -836,6 +1051,12 @@ ${itemsLines}
           storePageUrl: normalizedUrl,
           messengerUrl: normalizedUrl,
           adminPin: storeConfig.adminPin.trim(),
+          vfcNumber: (storeConfig.vfcNumber || DEFAULT_VFC_NUMBER).trim(),
+          vfcRecipient: (storeConfig.vfcRecipient || 'Bonka Store').trim(),
+          instapayAccount: (storeConfig.instapayAccount || DEFAULT_INSTAPAY_ACCOUNT).trim(),
+          instapayRecipient: (storeConfig.instapayRecipient || 'loaysameh12').trim(),
+          teldaAccount: (storeConfig.teldaAccount || DEFAULT_TELDA_ACCOUNT).trim(),
+          teldaRecipient: (storeConfig.teldaRecipient || 'Bonka Store').trim(),
           updatedAt: Date.now()
         };
 
@@ -843,13 +1064,62 @@ ${itemsLines}
         syncLocalState('settings', nextCfg);
 
         if (!hasValidFirebase) {
-          showToast(tr("تم حفظ الإعدادات وتطبيقها فوراً على الموبايل والكمبيوتر!", "Settings saved & synced across Mobile and PC!"));
+          showToast(tr("تم حفظ أرقام الدفع والروابط والإعدادات بنجاح!", "Payment numbers, links & settings saved!"));
           return;
         }
 
         try {
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'store_settings', 'config'), nextCfg);
-          showToast(tr("تم حفظ الإعدادات وتطبيقها فوراً على الموبايل والكمبيوتر!", "Settings saved & synced across Mobile and PC!"));
+          showToast(tr("تم حفظ أرقام الدفع والروابط والإعدادات بنجاح!", "Payment numbers, links & settings saved!"));
+        } catch (err) {}
+      };
+
+      // Admin Promo Codes Management
+      const handleAddPromoCode = async (e) => {
+        e.preventDefault();
+        const cleanCode = newPromoForm.code.trim().toUpperCase();
+        const val = Number(newPromoForm.discountValue);
+        if (!cleanCode || !val || val <= 0) {
+          showToast(tr('أدخل كود خصم وقيمة صحيحة', 'Enter a valid code and discount value'), 'error');
+          return;
+        }
+        const newPromo = {
+          id: 'promo_' + Date.now(),
+          code: cleanCode,
+          discountType: newPromoForm.discountType,
+          discountValue: val,
+          active: true,
+          createdAt: Date.now()
+        };
+        const updated = [newPromo, ...promoCodes.filter(p => p.code.toUpperCase() !== cleanCode)];
+        setPromoCodes(updated);
+        syncLocalState('promo_codes', updated);
+        setNewPromoForm({ code: '', discountType: 'percent', discountValue: 10 });
+
+        if (!hasValidFirebase) {
+          showToast(tr(`تم إضافة كود الخصم ${cleanCode} بنجاح!`, `Added promo code ${cleanCode}!`));
+          return;
+        }
+
+        try {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promo_codes', newPromo.id), newPromo);
+          showToast(tr(`تم إضافة كود الخصم ${cleanCode} بنجاح!`, `Added promo code ${cleanCode}!`));
+        } catch (err) {}
+      };
+
+      const handleDeletePromoCode = async (promo) => {
+        const updated = promoCodes.filter(p => p.id !== promo.id);
+        setPromoCodes(updated);
+        syncLocalState('promo_codes', updated);
+        if (appliedPromo?.id === promo.id) setAppliedPromo(null);
+
+        if (!hasValidFirebase) {
+          showToast(tr('تم حذف كود الخصم', 'Promo code deleted'), 'info');
+          return;
+        }
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promo_codes', promo.id));
+          showToast(tr('تم حذف كود الخصم', 'Promo code deleted'), 'info');
         } catch (err) {}
       };
 
@@ -906,6 +1176,7 @@ ${itemsLines}
             gameId: game.id,
             title: game.title,
             console: game.console,
+            genre: game.genre || 'Action / Adventure',
             image: game.image,
             licenseType,
             price: unitPrice,
@@ -931,6 +1202,7 @@ ${itemsLines}
               gameId: game.id,
               title: game.title,
               console: game.console,
+              genre: game.genre || 'Action / Adventure',
               image: game.image,
               licenseType,
               price: unitPrice,
@@ -945,7 +1217,7 @@ ${itemsLines}
 
       const updateCartQuantity = async (cartItem, delta) => {
         if (!user) return;
-        const newQty = cartItem.quantity + delta;
+        const newQty = (Number(cartItem.quantity) || 1) + delta;
 
         const updated = newQty <= 0
           ? cart.filter(i => i.id !== cartItem.id)
@@ -1008,26 +1280,6 @@ ${itemsLines}
         } catch (err) {}
       };
 
-      const handleRestoreDefaultGames = async () => {
-        if (!user) return;
-        setGames(INITIAL_GAMES_SEED);
-        syncLocalState('games', INITIAL_GAMES_SEED);
-
-        if (!hasValidFirebase) {
-          showToast(tr("تمت استعادة الألعاب الافتراضية للمتجر بنجاح!", "Default catalog games restored successfully!"));
-          return;
-        }
-
-        try {
-          const gamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'games');
-          for (const item of INITIAL_GAMES_SEED) {
-            const docRef = doc(gamesRef, item.slug);
-            await setDoc(docRef, { ...item, createdAt: Date.now() });
-          }
-          showToast(tr("تمت استعادة الألعاب الافتراضية للمتجر بنجاح!", "Default catalog games restored successfully!"));
-        } catch (err) {}
-      };
-
       const copyTextToClipboard = (text, idLabel) => {
         const textArea = document.createElement("textarea");
         textArea.value = text;
@@ -1041,39 +1293,15 @@ ${itemsLines}
         document.body.removeChild(textArea);
       };
 
-      const cartTotals = useMemo(() => {
-        let subtotal = 0;
-        let retailTotal = 0;
-        let count = 0;
-        cart.forEach((item) => {
-          const liveGame = games.find((g) => g.id === item.gameId);
-          const qty = Number(item.quantity) || 1;
-          const price = liveGame
-            ? (item.licenseType === 'Primary' ? normalizeEgpPrice(liveGame.primaryPrice, 1100) : normalizeEgpPrice(liveGame.secondaryPrice, 650))
-            : normalizeEgpPrice(item.price, 750);
-          const retail = liveGame
-            ? normalizeEgpPrice(liveGame.retailPrice, 3200)
-            : normalizeEgpPrice(item.retailPrice, 3200);
-          subtotal += price * qty;
-          retailTotal += retail * qty;
-          count += qty;
-        });
-        return {
-          subtotal,
-          retailTotal,
-          totalSavings: Math.max(0, retailTotal - subtotal),
-          count
-        };
-      }, [cart, games]);
-
       const handleCompleteCheckout = async (e) => {
         e.preventDefault();
         if (!user || cart.length === 0) return;
-        if (!checkoutForm.agreedToRules) {
-          showToast(
-            tr('يرجى الموافقة على شروط استخدام الحساب الأساسي والثانوي أولاً.', 'Please agree to the Primary & Secondary account rules first.'),
-            'error'
-          );
+        if (!checkoutForm.customerName.trim()) {
+          showToast(tr('يرجى إدخال الاسم الكامل', 'Please enter your full name'), 'error');
+          return;
+        }
+        if (!checkoutForm.receiptImage) {
+          showToast(tr('يرجى رفع صورة تأكيد التحويل أولاً!', 'Please upload a transfer confirmation screenshot first!'), 'error');
           return;
         }
 
@@ -1154,11 +1382,15 @@ ${itemsLines}
             customerEmail: '',
             whatsappNumber: checkoutForm.whatsappNumber.trim(),
             consoleModel: 'PS4 / PS5',
-            paymentMethod: 'vodafone_instapay',
-            totalAmount: cartTotals.subtotal,
+            paymentMethod: checkoutForm.paymentMethod,
+            receiptImage: checkoutForm.receiptImage,
+            promoCode: appliedPromo ? appliedPromo.code : null,
+            discountAmount: cartTotals.promoDiscount || 0,
+            subtotalAmount: cartTotals.subtotal,
+            totalAmount: cartTotals.finalTotal,
             totalSavings: cartTotals.totalSavings,
             itemCount: cartTotals.count,
-            status: tr('بانتظار تأكيد الطلب عبر واتساب / ماسنجر', 'Pending WhatsApp / Messenger Confirmation'),
+            status: tr('تم إرفاق إيصال الدفع - بانتظار تأكيد واتساب / ماسنجر', 'Receipt Uploaded - Pending WhatsApp / Messenger'),
             credentialsUnlocked: false,
             deliveredAccounts: JSON.stringify(deliveredAccounts),
             createdAt: Date.now()
@@ -1193,13 +1425,16 @@ ${itemsLines}
 
           setCart([]);
           syncLocalState('cart', []);
+          setAppliedPromo(null);
+          setPromoInput('');
+          setCheckoutForm(prev => ({ ...prev, receiptImage: '', receiptFileName: '' }));
 
           if (!hasValidFirebase) {
             setCheckoutModalOpen(false);
             setCartOpen(false);
             setActiveTab('orders');
             setPostOrderModal(localOrder);
-            showToast(tr(`تم تسجيل طلبك رقم ${orderNumber} بنجاح! أكد الطلب لاستلام الـ QR Code.`, `Order ${orderNumber} created!`));
+            showToast(tr(`تم تسجيل طلبك رقم ${orderNumber} بنجاح! أرسل التأكيد الآن على واتساب أو ماسنجر.`, `Order ${orderNumber} created!`));
             return;
           }
 
@@ -1213,7 +1448,7 @@ ${itemsLines}
           setCartOpen(false);
           setActiveTab('orders');
           setPostOrderModal({ id: orderDocRef.id, ...newOrderData });
-          showToast(tr(`تم تسجيل طلبك رقم ${orderNumber} بنجاح! أكد الطلب لاستلام الـ QR Code.`, `Order ${orderNumber} created!`));
+          showToast(tr(`تم تسجيل طلبك رقم ${orderNumber} بنجاح! أرسل التأكيد الآن على واتساب أو ماسنجر.`, `Order ${orderNumber} created!`));
         } catch (err) {
           showToast(tr("حدث خطأ أثناء إتمام الطلب.", "Error completing order."), "error");
         } finally {
@@ -1488,7 +1723,7 @@ ${itemsLines}
       return (
         <div
           dir={isAr ? 'rtl' : 'ltr'}
-          className={`min-h-screen bg-[#060913] text-slate-100 font-sans selection:bg-blue-600 selection:text-white ${
+          className={`min-h-screen bg-[#060913] text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950 ${
             isAr ? 'text-right' : 'text-left'
           }`}
         >
@@ -1505,8 +1740,8 @@ ${itemsLines}
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="hidden md:inline text-emerald-300">
-                  {tr('فودافون كاش • إنستا باي', 'Vodafone Cash • InstaPay')}
+                <span className="hidden md:inline text-cyan-300">
+                  {tr('فودافون كاش • إنستا باي • تيلدا', 'Vodafone Cash • InstaPay • Telda')}
                 </span>
               </div>
             </div>
@@ -1578,15 +1813,15 @@ ${itemsLines}
                 </div>
               )}
 
-              {/* Ambient Blue Glow */}
+              {/* Ambient Glow */}
               <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
                 <div className="absolute -top-40 -left-40 w-96 h-96 bg-blue-600/15 rounded-full blur-[130px]" />
-                <div className="absolute top-1/3 -right-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-[140px]" />
+                <div className="absolute top-1/3 -right-40 w-96 h-96 bg-cyan-600/10 rounded-full blur-[140px]" />
               </div>
 
               {/* Toast */}
               {toast && (
-                <div className={`fixed bottom-6 ${isAr ? 'right-6' : 'left-6'} z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border backdrop-blur-xl animate-bounce bg-slate-900/95 border-blue-500/40 text-white max-w-md`}>
+                <div className={`fixed bottom-6 ${isAr ? 'right-6' : 'left-6'} z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border backdrop-blur-xl animate-bounce bg-slate-900/95 border-cyan-500/40 text-white max-w-md`}>
                   {toast.type === 'error' ? (
                     <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
                   ) : toast.type === 'info' ? (
@@ -1707,7 +1942,7 @@ ${itemsLines}
                       className="relative flex items-center gap-2 px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-lg shadow-blue-600/25 transition-all"
                     >
                       <ShoppingCart className="w-4 h-4" />
-                      <span className="hidden sm:inline">{formatEGP(cartTotals.subtotal, lang)}</span>
+                      <span className="hidden sm:inline">{formatEGP(cartTotals.finalTotal, lang)}</span>
                       <span className="px-2 py-0.5 text-xs rounded-full bg-black/30 font-bold">
                         {cartTotals.count}
                       </span>
@@ -1797,7 +2032,7 @@ ${itemsLines}
                               </li>
                               <li className="flex items-center gap-2.5">
                                 <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                                <span>{tr('دعم فني وتأكيد عبر واتساب', 'WhatsApp support')}</span>
+                                <span>{tr('دفع سهل عبر فودافون كاش أو إنستاباي أو تيلدا', 'Easy payment via VF Cash, InstaPay, or Telda')}</span>
                               </li>
                             </ul>
                           </div>
@@ -2079,9 +2314,19 @@ ${itemsLines}
                           return (
                             <div key={order.id} className="rounded-3xl bg-slate-900/90 border border-white/10 overflow-hidden shadow-xl">
                               <div className="bg-slate-950/90 px-6 py-4 border-b border-white/10 flex flex-wrap items-center justify-between gap-4">
-                                <div>
-                                  <span className="text-[10px] text-slate-400 block">{tr('رقم الطلب', 'Order ID')}</span>
-                                  <span className="font-mono font-bold text-sm text-blue-400">{order.orderNumber}</span>
+                                <div className="flex items-center gap-4">
+                                  <div>
+                                    <span className="text-[10px] text-slate-400 block">{tr('رقم الطلب', 'Order ID')}</span>
+                                    <span className="font-mono font-bold text-sm text-cyan-400">{order.orderNumber}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] text-slate-400 block">{tr('طريقة الدفع', 'Payment')}</span>
+                                    <span className="text-xs font-bold text-white">{getPaymentMethodLabel(order.paymentMethod)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[10px] text-slate-400 block">{tr('الإجمالي', 'Total')}</span>
+                                    <span className="text-xs font-black text-emerald-400">{formatEGP(order.totalAmount, lang)}</span>
+                                  </div>
                                 </div>
                                 <span className={`px-3 py-1 rounded-full text-xs font-bold ${order.credentialsUnlocked ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
                                   {order.status}
@@ -2091,9 +2336,18 @@ ${itemsLines}
                               {!order.credentialsUnlocked && (
                                 <div className="bg-gradient-to-r from-amber-950/50 via-slate-900 to-emerald-950/40 px-6 py-4 border-b border-amber-500/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
                                   <p className="text-xs text-slate-300">
-                                    {tr('أكد طلبك عبر واتساب أو ماسنجر لاستلام الـ QR Code الخاص بحسابك فوراً.', 'Confirm via WhatsApp or Messenger to receive your QR Code.')}
+                                    {tr('أكد طلبك وأرسل صورة التحويل عبر واتساب أو ماسنجر لاستلام الـ QR Code الخاص بحسابك فوراً.', 'Confirm via WhatsApp or Messenger to receive your QR Code.')}
                                   </p>
                                   <div className="flex gap-2">
+                                    {order.receiptImage && (
+                                      <button
+                                        onClick={() => setReceiptPreviewModal(order.receiptImage)}
+                                        className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-xs flex items-center gap-1.5"
+                                      >
+                                        <ImageIcon className="w-3.5 h-3.5" />
+                                        <span>{tr('إيصال الدفع', 'Receipt')}</span>
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => handleConfirmViaWhatsApp(order)}
                                       className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
@@ -2147,7 +2401,7 @@ ${itemsLines}
                       <h2 className="text-2xl sm:text-3xl font-black text-white">
                         {tr('لوحة تحكم الإدارة', 'Admin Dashboard')}
                       </h2>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <button onClick={() => setAdminSubTab('inventory')} className={`px-3.5 py-2 rounded-xl text-xs font-bold ${adminSubTab === 'inventory' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400'}`}>
                           {tr('الألعاب', 'Games')}
                         </button>
@@ -2155,42 +2409,217 @@ ${itemsLines}
                           {tr('إضافة لعبة', 'Add Game')}
                         </button>
                         <button onClick={() => setAdminSubTab('orders')} className={`px-3.5 py-2 rounded-xl text-xs font-bold ${adminSubTab === 'orders' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400'}`}>
-                          {tr('الطلبات', 'Orders')}
+                          {tr('الطلبات والإيصالات', 'Orders & Receipts')}
+                        </button>
+                        <button onClick={() => setAdminSubTab('promos')} className={`px-3.5 py-2 rounded-xl text-xs font-bold ${adminSubTab === 'promos' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400'}`}>
+                          {tr('أكواد الخصم (Promo)', 'Promo Codes')}
                         </button>
                         <button onClick={() => setAdminSubTab('vault')} className={`px-3.5 py-2 rounded-xl text-xs font-bold ${adminSubTab === 'vault' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400'}`}>
                           {tr('الخزنة (QR)', 'Vault')}
                         </button>
                         <button onClick={() => setAdminSubTab('settings')} className={`px-3.5 py-2 rounded-xl text-xs font-bold ${adminSubTab === 'settings' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400'}`}>
-                          {tr('الإعدادات', 'Settings')}
+                          {tr('أرقام الدفع والإعدادات', 'Payment & Settings')}
                         </button>
                       </div>
                     </div>
 
+                    {/* Admin Promo Codes Tab */}
+                    {adminSubTab === 'promos' && (
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <form onSubmit={handleAddPromoCode} className="lg:col-span-5 rounded-3xl bg-slate-900 border border-white/10 p-6 space-y-4 self-start">
+                          <h3 className="text-lg font-black text-white flex items-center gap-2">
+                            <Tag className="w-5 h-5 text-cyan-400" />
+                            <span>{tr('إنشاء كود خصم جديد', 'Create Promo Code')}</span>
+                          </h3>
+                          <div>
+                            <label className="block text-xs font-bold uppercase text-slate-400 mb-1">{tr('كود الخصم (مثال: BONKA20) *', 'Promo Code *')}</label>
+                            <input
+                              type="text"
+                              required
+                              dir="ltr"
+                              value={newPromoForm.code}
+                              onChange={(e) => setNewPromoForm({ ...newPromoForm, code: e.target.value.toUpperCase() })}
+                              placeholder="BONKA20"
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-cyan-300 font-mono font-bold uppercase"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold uppercase text-slate-400 mb-1">{tr('نوع الخصم *', 'Discount Type *')}</label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setNewPromoForm({ ...newPromoForm, discountType: 'percent' })}
+                                className={`py-2.5 px-3 rounded-xl text-xs font-bold border ${newPromoForm.discountType === 'percent' ? 'bg-cyan-600 border-cyan-400 text-white' : 'bg-slate-950 border-white/10 text-slate-400'}`}
+                              >
+                                {tr('نسبة مئوية (%)', 'Percentage (%)')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setNewPromoForm({ ...newPromoForm, discountType: 'fixed' })}
+                                className={`py-2.5 px-3 rounded-xl text-xs font-bold border ${newPromoForm.discountType === 'fixed' ? 'bg-cyan-600 border-cyan-400 text-white' : 'bg-slate-950 border-white/10 text-slate-400'}`}
+                              >
+                                {tr('مبلغ ثابت (ج.م)', 'Fixed Amount (EGP)')}
+                              </button>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
+                              {newPromoForm.discountType === 'percent' ? tr('نسبة الخصم (%) *', 'Discount % *') : tr('قيمة الخصم بالجنيه (EGP) *', 'Discount Amount (EGP) *')}
+                            </label>
+                            <input
+                              type="number"
+                              required
+                              min="1"
+                              max={newPromoForm.discountType === 'percent' ? 95 : 10000}
+                              dir="ltr"
+                              value={newPromoForm.discountValue}
+                              onChange={(e) => setNewPromoForm({ ...newPromoForm, discountValue: e.target.value })}
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white font-mono"
+                            />
+                          </div>
+                          <button type="submit" className="w-full py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs">
+                            {tr('إضافة وتفعيل الكود', 'Add & Activate Promo Code')}
+                          </button>
+                        </form>
+
+                        <div className="lg:col-span-7 rounded-3xl bg-slate-900 border border-white/10 overflow-hidden">
+                          <div className="p-5 border-b border-white/10 bg-slate-950/60">
+                            <h3 className="font-bold text-white text-base">{tr('أكواد الخصم الفعالة', 'Active Promo Codes')}</h3>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full border-collapse">
+                              <thead>
+                                <tr className="border-b border-white/10 text-[10px] uppercase text-slate-400 bg-slate-950/40">
+                                  <th className="py-3 px-4">{tr('الكود', 'Code')}</th>
+                                  <th className="py-3 px-4">{tr('قيمة الخصم', 'Discount')}</th>
+                                  <th className="py-3 px-4">{tr('حذف', 'Delete')}</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-white/5 text-xs">
+                                {promoCodes.map((p) => (
+                                  <tr key={p.id} className="hover:bg-white/5">
+                                    <td className="py-3.5 px-4 font-mono font-black text-cyan-400">{p.code}</td>
+                                    <td className="py-3.5 px-4 font-bold text-emerald-400">
+                                      {p.discountType === 'percent' ? `${p.discountValue}%` : formatEGP(p.discountValue, lang)}
+                                    </td>
+                                    <td className="py-3.5 px-4">
+                                      <button onClick={() => handleDeletePromoCode(p)} className="p-1.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-600 hover:text-white">
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Admin Payment & Store Settings */}
                     {adminSubTab === 'settings' && (
-                      <form onSubmit={handleSaveStoreSettings} className="rounded-3xl bg-slate-900 border border-white/10 p-6 sm:p-8 max-w-2xl mx-auto space-y-5">
-                        <h3 className="text-xl font-black text-white">{tr('إعدادات واتساب وماسنجر', 'Settings')}</h3>
-                        <div>
-                          <label className="block text-xs font-bold uppercase text-emerald-400 mb-1.5">{tr('رابط واتساب الخاص بك (WhatsApp QR Link)', 'WhatsApp Link')}</label>
-                          <input
-                            type="text"
-                            dir="ltr"
-                            value={storeConfig.whatsappNumber}
-                            onChange={(e) => setStoreConfig({ ...storeConfig, whatsappNumber: e.target.value })}
-                            placeholder="https://wa.me/qr/P5JRG2C3PYVYP1"
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-sm text-white font-mono"
-                          />
+                      <form onSubmit={handleSaveStoreSettings} className="rounded-3xl bg-slate-900 border border-white/10 p-6 sm:p-8 max-w-3xl mx-auto space-y-6">
+                        <h3 className="text-xl font-black text-white border-b border-white/10 pb-3">
+                          {tr('إعدادات أرقام وروابط الدفع (فودافون كاش / إنستاباي / تيلدا)', 'Payment Numbers & Store Links')}
+                        </h3>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-2xl bg-slate-950/80 border border-amber-500/30">
+                          <div>
+                            <label className="block text-xs font-bold text-amber-400 mb-1.5">{tr('رقم فودافون كاش (Vodafone Cash)', 'Vodafone Cash Number')}</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={storeConfig.vfcNumber || ''}
+                              onChange={(e) => setStoreConfig({ ...storeConfig, vfcNumber: e.target.value })}
+                              placeholder="01205047037"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-400 mb-1.5">{tr('اسم المستلم (فودافون كاش)', 'Recipient Name')}</label>
+                            <input
+                              type="text"
+                              value={storeConfig.vfcRecipient || ''}
+                              onChange={(e) => setStoreConfig({ ...storeConfig, vfcRecipient: e.target.value })}
+                              placeholder="Bonka Store"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white"
+                            />
+                          </div>
                         </div>
-                        <div>
-                          <label className="block text-xs font-bold uppercase text-blue-400 mb-1.5">{tr('رابط ماسنجر فيسبوك', 'Messenger Link')}</label>
-                          <input
-                            type="url"
-                            dir="ltr"
-                            value={storeConfig.storePageUrl}
-                            onChange={(e) => setStoreConfig({ ...storeConfig, storePageUrl: e.target.value, messengerUrl: e.target.value })}
-                            placeholder="https://m.me/358605444011590"
-                            className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-blue-500/40 text-sm text-white font-mono"
-                          />
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-2xl bg-slate-950/80 border border-cyan-500/30">
+                          <div>
+                            <label className="block text-xs font-bold text-cyan-400 mb-1.5">{tr('رابط أو رقم إنستاباي (InstaPay)', 'InstaPay Link or Number')}</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={storeConfig.instapayAccount || ''}
+                              onChange={(e) => setStoreConfig({ ...storeConfig, instapayAccount: e.target.value })}
+                              placeholder="https://ipn.eg/S/loaysameh12/instapay/5DaPYm"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-400 mb-1.5">{tr('اسم المستلم (InstaPay)', 'InstaPay Recipient Name')}</label>
+                            <input
+                              type="text"
+                              value={storeConfig.instapayRecipient || ''}
+                              onChange={(e) => setStoreConfig({ ...storeConfig, instapayRecipient: e.target.value })}
+                              placeholder="loaysameh12"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white"
+                            />
+                          </div>
                         </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-2xl bg-slate-950/80 border border-purple-500/30">
+                          <div>
+                            <label className="block text-xs font-bold text-purple-400 mb-1.5">{tr('رقم أو يوزر تيلدا (Telda)', 'Telda Number / Username')}</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={storeConfig.teldaAccount || ''}
+                              onChange={(e) => setStoreConfig({ ...storeConfig, teldaAccount: e.target.value })}
+                              placeholder="@bonka أو رقم الهاتف"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-400 mb-1.5">{tr('اسم المستلم (Telda)', 'Telda Recipient Name')}</label>
+                            <input
+                              type="text"
+                              value={storeConfig.teldaRecipient || ''}
+                              onChange={(e) => setStoreConfig({ ...storeConfig, teldaRecipient: e.target.value })}
+                              placeholder="Bonka Store"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-bold uppercase text-emerald-400 mb-1.5">{tr('رابط واتساب لاستقبال الطلبات', 'WhatsApp Link')}</label>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={storeConfig.whatsappNumber}
+                              onChange={(e) => setStoreConfig({ ...storeConfig, whatsappNumber: e.target.value })}
+                              placeholder="https://wa.me/qr/P5JRG2C3PYVYP1"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-sm text-white font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold uppercase text-blue-400 mb-1.5">{tr('رابط ماسنجر فيسبوك', 'Messenger Link')}</label>
+                            <input
+                              type="url"
+                              dir="ltr"
+                              value={storeConfig.storePageUrl}
+                              onChange={(e) => setStoreConfig({ ...storeConfig, storePageUrl: e.target.value, messengerUrl: e.target.value })}
+                              placeholder="https://m.me/358605444011590"
+                              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-blue-500/40 text-sm text-white font-mono"
+                            />
+                          </div>
+                        </div>
+
                         <div>
                           <label className="block text-xs font-bold uppercase text-indigo-400 mb-1.5">{tr('الكود السري للإدارة', 'Admin Pin')}</label>
                           <input
@@ -2202,8 +2631,9 @@ ${itemsLines}
                             className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-indigo-500/40 text-sm text-amber-300 font-mono"
                           />
                         </div>
-                        <button type="submit" className="px-6 py-3 rounded-xl bg-emerald-600 text-slate-950 font-black text-xs">
-                          {tr('حفظ الإعدادات', 'Save Settings')}
+
+                        <button type="submit" className="px-6 py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs w-full sm:w-auto">
+                          {tr('حفظ جميع أرقام الدفع والإعدادات', 'Save All Payment Numbers & Settings')}
                         </button>
                       </form>
                     )}
@@ -2371,6 +2801,13 @@ ${itemsLines}
                             className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white"
                           />
                         </div>
+                        <input
+                          type="text"
+                          value={gameForm.image}
+                          onChange={(e) => setGameForm({ ...gameForm, image: e.target.value })}
+                          placeholder="رابط صورة اللعبة (URL)"
+                          className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white font-mono"
+                        />
                         <textarea
                           rows={3}
                           required
@@ -2386,31 +2823,51 @@ ${itemsLines}
                     )}
 
                     {adminSubTab === 'orders' && (
-                      <div className="rounded-3xl bg-slate-900 border border-white/10 overflow-hidden">
+                      <div className="rounded-3xl bg-slate-900 border border-white/10 overflow-hidden overflow-x-auto">
                         <table className="w-full border-collapse">
                           <thead>
                             <tr className="border-b border-white/10 text-[11px] uppercase text-slate-400 bg-slate-950/60">
-                              <th className="py-3.5 px-5">{tr('رقم الطلب', 'Order ID')}</th>
-                              <th className="py-3.5 px-4">{tr('الاسم الثلاثي', 'Name')}</th>
-                              <th className="py-3.5 px-4">{tr('واتساب', 'WhatsApp')}</th>
+                              <th className="py-3.5 px-4">{tr('رقم الطلب', 'Order ID')}</th>
+                              <th className="py-3.5 px-4">{tr('الاسم', 'Name')}</th>
+                              <th className="py-3.5 px-4">{tr('طريقة الدفع', 'Method')}</th>
                               <th className="py-3.5 px-4">{tr('الإجمالي', 'Total')}</th>
-                              <th className="py-3.5 px-5">{tr('إجراءات', 'Actions')}</th>
+                              <th className="py-3.5 px-4">{tr('صورة التحويل', 'Receipt')}</th>
+                              <th className="py-3.5 px-4">{tr('إجراءات', 'Actions')}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-white/5 text-sm">
                             {orders.map((ord) => (
                               <tr key={ord.id} className="hover:bg-white/5">
-                                <td className="py-4 px-5 font-mono font-bold text-blue-400 text-xs">{ord.orderNumber}</td>
-                                <td className="py-4 px-4 font-bold text-white">{ord.customerName}</td>
-                                <td className="py-4 px-4 text-emerald-400 font-mono" dir="ltr">{ord.whatsappNumber}</td>
+                                <td className="py-4 px-4 font-mono font-bold text-cyan-400 text-xs">{ord.orderNumber}</td>
+                                <td className="py-4 px-4 font-bold text-white">
+                                  {ord.customerName}
+                                  {ord.whatsappNumber && <span className="block text-[11px] text-emerald-400 font-mono" dir="ltr">{ord.whatsappNumber}</span>}
+                                </td>
+                                <td className="py-4 px-4 text-xs font-bold text-slate-300">
+                                  {getPaymentMethodLabel(ord.paymentMethod)}
+                                  {ord.promoCode && <span className="block text-[10px] text-cyan-400">Promo: {ord.promoCode}</span>}
+                                </td>
                                 <td className="py-4 px-4 font-bold text-emerald-400">{formatEGP(ord.totalAmount, lang)}</td>
-                                <td className="py-4 px-5 flex gap-2">
+                                <td className="py-4 px-4">
+                                  {ord.receiptImage ? (
+                                    <button
+                                      onClick={() => setReceiptPreviewModal(ord.receiptImage)}
+                                      className="px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-xs font-bold flex items-center gap-1.5"
+                                    >
+                                      <ImageIcon className="w-3.5 h-3.5" />
+                                      <span>{tr('عرض الإيصال', 'View Receipt')}</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-xs text-slate-500">{tr('لا يوجد', 'None')}</span>
+                                  )}
+                                </td>
+                                <td className="py-4 px-4 flex gap-2">
                                   {!ord.credentialsUnlocked && (
-                                    <button onClick={() => handleAdminApproveAndUnlockOrder(ord)} className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-bold">
+                                    <button onClick={() => handleAdminApproveAndUnlockOrder(ord)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold">
                                       {tr('تأكيد وإرسال QR', 'Approve')}
                                     </button>
                                   )}
-                                  <button onClick={() => openManageOrderCredentials(ord)} className="px-3 py-1 rounded bg-blue-600 text-white text-xs font-bold">
+                                  <button onClick={() => openManageOrderCredentials(ord)} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold">
                                     {tr('تعديل QR', 'Edit QR')}
                                   </button>
                                 </td>
@@ -2423,6 +2880,21 @@ ${itemsLines}
                   </div>
                 )}
               </main>
+
+              {/* Receipt Image Preview Modal */}
+              {receiptPreviewModal && (
+                <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setReceiptPreviewModal(null)}>
+                  <div className="relative max-w-lg w-full rounded-3xl bg-slate-900 border border-cyan-500/40 p-4 space-y-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                      <h4 className="font-bold text-sm text-cyan-300">{tr('صورة إيصال التحويل المرفقة', 'Uploaded Transfer Receipt')}</h4>
+                      <button onClick={() => setReceiptPreviewModal(null)} className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <img src={receiptPreviewModal} alt="Transfer Receipt" className="w-full max-h-[75vh] object-contain rounded-2xl bg-black" />
+                  </div>
+                </div>
+              )}
 
               {/* Game Delete Modal */}
               {gameToDeleteModal && (
@@ -2438,46 +2910,49 @@ ${itemsLines}
                 </div>
               )}
 
-              {/* Post Order Modal */}
+              {/* Post Order Modal (Send Order + Transfer Screenshot to WhatsApp or Messenger) */}
               {postOrderModal && (
                 <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="w-full max-w-lg rounded-3xl p-6 sm:p-8 space-y-6 bg-slate-900 border-2 border-emerald-500/40 shadow-2xl">
+                  <div className="w-full max-w-lg rounded-3xl p-6 sm:p-8 space-y-6 bg-[#070b14] border-2 border-cyan-500/40 shadow-2xl">
                     <div className="flex items-start justify-between border-b border-white/10 pb-4">
                       <div>
-                        <span className="text-[11px] font-bold text-emerald-400">طلب رقم #{postOrderModal.orderNumber}</span>
-                        <h3 className="text-xl font-black text-white">{tr('أكد طلبك الآن لاستلام الـ QR Code', 'Confirm to receive QR Code')}</h3>
+                        <span className="text-[11px] font-bold text-cyan-400">طلب رقم #{postOrderModal.orderNumber}</span>
+                        <h3 className="text-xl font-black text-white">{tr('أرسل الطلب وصورة التحويل الآن', 'Send Order & Transfer Photo')}</h3>
                       </div>
                       <button onClick={() => setPostOrderModal(null)} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white">
                         <X className="w-4 h-4" />
                       </button>
                     </div>
 
-                    <div className="p-4 rounded-2xl bg-slate-950 border border-white/10 text-xs text-slate-300 leading-relaxed">
-                      {tr(
-                        'اضغط على زر واتساب أو ماسنجر أدناه لإرسال تفاصيل طلبك للإدارة واستلام الـ QR Code الخاص بحسابك فوراً.',
-                        'Click WhatsApp or Messenger below to send your order and receive your QR Code.'
-                      )}
-                    </div>
+                    {postOrderModal.receiptImage && (
+                      <div className="p-3 rounded-2xl bg-slate-950 border border-cyan-500/30 flex items-center gap-3">
+                        <img src={postOrderModal.receiptImage} alt="Receipt" className="w-16 h-16 object-cover rounded-xl border border-white/10" />
+                        <div className="text-xs space-y-1">
+                          <span className="text-emerald-400 font-bold block">{tr('✓ تم حفظ صورة التحويل مع طلبك', '✓ Transfer screenshot attached')}</span>
+                          <span className="text-slate-400 block">{tr('اضغط على واتساب أو ماسنجر بالأسفل لإرسال الطلب للإدارة.', 'Click WhatsApp or Messenger below to send.')}</span>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="space-y-3">
                       <button
                         onClick={() => handleConfirmViaWhatsApp(postOrderModal)}
-                        className="w-full py-3.5 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm flex items-center justify-between"
+                        className="w-full py-3.5 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm flex items-center justify-between shadow-lg"
                       >
                         <div className="flex items-center gap-3">
                           <PhoneCall className="w-5 h-5" />
-                          <span>{tr('تأكيد الطلب عبر واتساب (QR)', 'Confirm via WhatsApp')}</span>
+                          <span>{tr('إرسال الطلب وتأكيد التحويل عبر واتساب', 'Send Order via WhatsApp')}</span>
                         </div>
                         <ArrowUpRight className="w-5 h-5" />
                       </button>
 
                       <button
                         onClick={() => handleConfirmViaMessenger(postOrderModal)}
-                        className="w-full py-3.5 px-5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-sm flex items-center justify-between"
+                        className="w-full py-3.5 px-5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-sm flex items-center justify-between shadow-lg"
                       >
                         <div className="flex items-center gap-3">
                           <ExternalLink className="w-5 h-5" />
-                          <span>{tr('تأكيد الطلب عبر فيسبوك ماسنجر', 'Confirm via Messenger')}</span>
+                          <span>{tr('إرسال الطلب وتأكيد التحويل عبر ماسنجر', 'Send Order via Messenger')}</span>
                         </div>
                         <ArrowUpRight className="w-5 h-5" />
                       </button>
@@ -2509,54 +2984,169 @@ ${itemsLines}
                 </a>
               </div>
 
-              {/* Cart Drawer */}
+              {/* ========================================================= */}
+              {/* CART DRAWER (Redesigned to match your screenshots)        */}
+              {/* ========================================================= */}
               {cartOpen && (
-                <div className="fixed inset-0 z-50 flex justify-end bg-black/75 backdrop-blur-sm">
-                  <div className="w-full max-w-md bg-slate-900 border-r border-white/15 h-full flex flex-col justify-between shadow-2xl">
-                    <div className="p-5 border-b border-white/10 flex items-center justify-between bg-slate-950">
-                      <h3 className="font-black text-white text-base">{tr('سلة المشتريات', 'Shopping Cart')}</h3>
-                      <button onClick={() => setCartOpen(false)} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white">
+                <div className="fixed inset-0 z-50 flex justify-end bg-black/80 backdrop-blur-sm">
+                  <div className="w-full max-w-md bg-[#050811] border-r border-cyan-500/20 h-full flex flex-col justify-between shadow-2xl">
+                    {/* Cart Header */}
+                    <div className="p-5 border-b border-white/10 flex items-center justify-between bg-[#070b16]">
+                      <button onClick={() => setCartOpen(false)} className="p-2 rounded-xl bg-slate-900 border border-white/10 text-slate-400 hover:text-white">
                         <X className="w-4 h-4" />
                       </button>
+                      <div className="flex items-center gap-2.5">
+                        <span className="font-black text-white text-lg tracking-wider uppercase">YOUR CART</span>
+                        <ShoppingCart className="w-5 h-5 text-cyan-400" />
+                      </div>
                     </div>
 
+                    {/* Cart Items */}
                     <div className="flex-1 overflow-y-auto p-5 space-y-4">
                       {cart.length === 0 ? (
-                        <div className="text-center py-12 space-y-3">
-                          <ShoppingCart className="w-8 h-8 text-slate-600 mx-auto" />
-                          <p className="text-white font-bold text-sm">{tr('السلة فارغة', 'Cart is empty')}</p>
+                        <div className="text-center py-16 space-y-3">
+                          <ShoppingCart className="w-10 h-10 text-slate-600 mx-auto" />
+                          <p className="text-slate-300 font-bold text-sm">{tr('السلة فارغة حالياً', 'Your cart is empty')}</p>
                         </div>
                       ) : (
                         cart.map((item) => (
-                          <div key={item.id} className="p-4 rounded-2xl bg-slate-950 border border-white/10 flex gap-3 items-center">
-                            <img src={item.image} alt={item.title} className="w-14 h-14 rounded-xl object-cover" />
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-bold text-white text-xs truncate">{item.title}</h4>
-                              <span className="text-[10px] text-blue-300 block">{item.licenseType === 'Primary' ? 'أساسي' : 'ثانوي'}</span>
-                              <span className="font-black text-emerald-400 text-xs">{formatEGP(item.price * item.quantity, lang)}</span>
+                          <div key={item.id} className="p-4 rounded-2xl bg-[#090e1c] border border-white/10 flex gap-3.5 items-center justify-between">
+                            <div className="flex flex-col items-start justify-between self-stretch">
+                              <div className="text-cyan-400 font-black text-sm leading-tight" dir="ltr">
+                                {item.price * item.quantity} <span className="block text-[11px]">EGP</span>
+                              </div>
+                              <button onClick={() => removeFromCart(item.id)} className="text-rose-500/80 hover:text-rose-400 p-1">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
-                            <button onClick={() => removeFromCart(item.id)} className="text-slate-500 hover:text-rose-400">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+
+                            <div className="flex-1 text-right space-y-1">
+                              <h4 className="font-black text-white text-xs sm:text-sm leading-snug">
+                                ({item.console}) {item.title} ({item.licenseType === 'Primary' ? 'رئيسي' : 'ثانوي'})
+                              </h4>
+                              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">
+                                {item.console} • {item.genre || 'ACTION / ADVENTURE'}
+                              </span>
+
+                              {/* + / - Quantity Box */}
+                              <div className="pt-1 flex justify-end">
+                                <div className="inline-flex items-center gap-3 px-2.5 py-1 rounded-xl bg-slate-950 border border-white/15 text-xs font-bold text-white">
+                                  <button type="button" onClick={() => updateCartQuantity(item, -1)} className="text-slate-400 hover:text-white px-1">−</button>
+                                  <span>{item.quantity}</span>
+                                  <button type="button" onClick={() => updateCartQuantity(item, 1)} className="text-slate-400 hover:text-white px-1">+</button>
+                                </div>
+                              </div>
+                            </div>
+
+                            <img src={item.image} alt={item.title} className="w-16 h-20 rounded-xl object-cover border border-white/10 shrink-0" />
                           </div>
                         ))
                       )}
                     </div>
 
+                    {/* Cart Footer: Payment Dropdown + Promo Code + Totals */}
                     {cart.length > 0 && (
-                      <div className="p-5 border-t border-white/15 bg-slate-950 space-y-3">
-                        <div className="flex justify-between text-sm font-black text-white">
-                          <span>{tr('الإجمالي:', 'Total:')}</span>
-                          <span className="text-blue-400">{formatEGP(cartTotals.subtotal, lang)}</span>
+                      <div className="p-5 border-t border-white/10 bg-[#070b16] space-y-4">
+                        {/* Payment Method Selector Dropdown */}
+                        <div className="space-y-1.5 relative">
+                          <label className="block text-[11px] font-bold text-slate-400 text-right">
+                            {tr('طريقة الدفع', 'Payment Method')}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setPaymentDropdownOpen(!paymentDropdownOpen)}
+                            className="w-full px-4 py-3 rounded-2xl bg-[#0b1120] border border-white/20 hover:border-cyan-400/60 flex items-center justify-between text-xs font-bold text-white transition-all"
+                          >
+                            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${paymentDropdownOpen ? 'rotate-180' : ''}`} />
+                            <div className="flex items-center gap-2">
+                              <span>{selectedPaymentObj ? `${selectedPaymentObj.shortEn} ${selectedPaymentObj.shortAr}` : tr('اختر طريقة الدفع...', 'Select payment method...')}</span>
+                              <CreditCard className="w-4 h-4 text-cyan-400" />
+                            </div>
+                          </button>
+
+                          {paymentDropdownOpen && (
+                            <div className="absolute bottom-full left-0 right-0 mb-2 rounded-2xl bg-[#090f1d] border border-cyan-500/30 shadow-2xl overflow-hidden z-50 divide-y divide-white/5">
+                              {paymentMethodsList.map((method) => (
+                                <button
+                                  type="button"
+                                  key={method.id}
+                                  onClick={() => {
+                                    setCheckoutForm({ ...checkoutForm, paymentMethod: method.id });
+                                    setPaymentDropdownOpen(false);
+                                  }}
+                                  className={`w-full px-4 py-3 flex items-center justify-end gap-3 text-xs font-bold transition-colors hover:bg-white/5 ${
+                                    checkoutForm.paymentMethod === method.id ? 'bg-cyan-500/10 text-cyan-300' : 'text-slate-200'
+                                  }`}
+                                >
+                                  <span className="text-slate-400">{method.shortAr}</span>
+                                  <span className="font-extrabold text-white">{method.shortEn}</span>
+                                  <Wallet className="w-4 h-4 text-slate-400" />
+                                  <span className={`w-2.5 h-2.5 rounded-full ${method.dotColor}`} />
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
+
+                        {/* Promo Code Box */}
+                        <div className="p-2.5 rounded-2xl border border-dashed border-cyan-500/30 bg-[#090e1c] flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleApplyPromoCode}
+                            className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs shrink-0 transition-all"
+                          >
+                            {tr('تطبيق', 'Apply')}
+                          </button>
+                          <input
+                            type="text"
+                            value={promoInput}
+                            onChange={(e) => setPromoInput(e.target.value)}
+                            placeholder={tr('أدخل كود الخصم', 'Enter promo code')}
+                            className="w-full px-3 py-2 rounded-xl bg-[#050811] border border-white/10 text-xs text-white text-right placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                          />
+                        </div>
+
+                        {appliedPromo && (
+                          <div className="flex items-center justify-between text-xs px-2 text-emerald-400 font-bold">
+                            <button onClick={() => setAppliedPromo(null)} className="text-rose-400 text-[11px] hover:underline">
+                              {tr('إلغاء الكود', 'Remove')}
+                            </button>
+                            <span>✓ كود الخصم مفعل: {appliedPromo.code} (-{formatEGP(cartTotals.promoDiscount, lang)})</span>
+                          </div>
+                        )}
+
+                        {/* Summary Lines */}
+                        <div className="space-y-1.5 pt-1 text-xs">
+                          <div className="flex items-center justify-between text-slate-400 font-semibold">
+                            <span dir="ltr">EGP {cartTotals.subtotal.toFixed(2)}</span>
+                            <span>{tr('المجموع الفرعي', 'Subtotal')}</span>
+                          </div>
+                          {cartTotals.promoDiscount > 0 && (
+                            <div className="flex items-center justify-between text-emerald-400 font-bold">
+                              <span dir="ltr">- EGP {cartTotals.promoDiscount.toFixed(2)}</span>
+                              <span>{tr('قيمة الخصم', 'Promo Discount')}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between text-slate-400 font-semibold">
+                            <span dir="ltr">EGP 0.00</span>
+                            <span>GST / VAT (0%)</span>
+                          </div>
+                          <div className="flex items-center justify-between pt-2 border-t border-white/10 text-base font-black">
+                            <span className="text-cyan-400 text-lg" dir="ltr">EGP {cartTotals.finalTotal.toFixed(2)}</span>
+                            <span className="text-white">{tr('المجموع الكلي', 'Total')}</span>
+                          </div>
+                        </div>
+
+                        {/* Proceed to Checkout Button */}
                         <button
                           onClick={() => {
                             setCartOpen(false);
                             setCheckoutModalOpen(true);
                           }}
-                          className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs shadow-lg"
+                          className="w-full py-3.5 rounded-2xl bg-[#0c243c] hover:bg-cyan-600 border border-cyan-500/40 text-cyan-200 hover:text-slate-950 font-black text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
                         >
-                          {tr('إتمام الطلب', 'Checkout')}
+                          <ShieldCheck className="w-4 h-4" />
+                          <span>{tr('إتمام الطلب', 'Complete Order')}</span>
                         </button>
                       </div>
                     )}
@@ -2564,35 +3154,129 @@ ${itemsLines}
                 </div>
               )}
 
-              {/* Simplified Checkout Modal (الاسم الثلاثي + رقم الواتساب + فودافون كاش / إنستا باي) */}
+              {/* ================================================================= */}
+              {/* CHECKOUT MODAL (Matches your screenshot with Transfer & Upload)   */}
+              {/* ================================================================= */}
               {checkoutModalOpen && (
-                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                  <div className="w-full max-w-lg rounded-3xl p-6 sm:p-8 space-y-6 my-8 bg-slate-900 border border-white/15 shadow-2xl">
+                <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="w-full max-w-lg rounded-3xl p-6 sm:p-7 space-y-5 my-8 bg-[#050912] border border-cyan-500/30 shadow-[0_0_60px_rgba(6,182,212,0.15)]">
+                    {/* Header */}
                     <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                      <div>
-                        <span className="text-[11px] font-bold text-blue-400">{tr('تسليم فوري (QR Code)', 'Instant QR Delivery')}</span>
-                        <h3 className="text-xl font-black text-white">{tr('إتمام بيانات الطلب', 'Complete Order')}</h3>
-                      </div>
-                      <button onClick={() => setCheckoutModalOpen(false)} className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white">
+                      <button onClick={() => setCheckoutModalOpen(false)} className="p-2 rounded-xl bg-slate-900 border border-white/10 text-slate-400 hover:text-white">
                         <X className="w-4 h-4" />
                       </button>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <h3 className="text-xl font-black text-white">{tr('إتمام طلبك', 'Complete Your Order')}</h3>
+                          <span className="text-xs text-slate-400">{tr('أدخل بياناتك لتأكيد طلبك', 'Enter your details to confirm')}</span>
+                        </div>
+                        <div className="w-11 h-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                          <MessageCircle className="w-5 h-5" />
+                        </div>
+                      </div>
                     </div>
 
-                    <form onSubmit={handleCompleteCheckout} className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-slate-400 mb-1">{tr('الاسم الثلاثي *', 'Full Name *')}</label>
-                        <input
-                          type="text"
-                          required
-                          value={checkoutForm.customerName}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, customerName: e.target.value })}
-                          placeholder={tr('أحمد محمد علي', 'Ahmed Mohamed Ali')}
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white"
-                        />
+                    <form onSubmit={handleCompleteCheckout} className="space-y-5">
+                      {/* Payment Method Tabs (Switchable directly inside Checkout too) */}
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-3 gap-2">
+                          {paymentMethodsList.map((pm) => (
+                            <button
+                              type="button"
+                              key={pm.id}
+                              onClick={() => setCheckoutForm({ ...checkoutForm, paymentMethod: pm.id })}
+                              className={`py-2.5 px-2 rounded-xl text-xs font-black border transition-all flex items-center justify-center gap-1.5 ${
+                                checkoutForm.paymentMethod === pm.id
+                                  ? 'bg-cyan-500/15 border-cyan-400 text-cyan-300 shadow-md'
+                                  : 'bg-slate-950 border-white/10 text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              <span className={`w-2 h-2 rounded-full ${pm.dotColor}`} />
+                              <span>{pm.shortAr}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Selected Payment Banner */}
+                        <div className="px-4 py-3 rounded-2xl bg-[#081221] border border-cyan-500/30 flex items-center justify-end gap-2 text-xs sm:text-sm font-bold">
+                          <span className="text-cyan-400 font-black">{selectedPaymentObj.titleAr}</span>
+                          <span className="text-slate-300">{tr('طريقة الدفع المختارة:', 'Selected Payment:')}</span>
+                          <Zap className="w-4 h-4 text-cyan-400" />
+                        </div>
                       </div>
 
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-emerald-400 mb-1">{tr('رقم الواتساب الخاص بك *', 'WhatsApp Number *')}</label>
+                      {/* Transfer To Box (حول الدفع إلى) */}
+                      <div className="p-4 rounded-2xl bg-[#070e1b] border border-cyan-500/25 space-y-2">
+                        <span className="block text-[11px] font-bold text-cyan-400 text-right">
+                          {tr('حول الدفع إلى', 'Transfer Payment To')}
+                        </span>
+
+                        <div className="p-4 rounded-xl bg-[#040811] border border-white/10 flex items-center justify-between gap-3">
+                          <div className="flex flex-col gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                copyTextToClipboard(selectedPaymentObj.transferValue, 'checkout_payment_copy');
+                                showToast(tr('تم نسخ رقم / رابط التحويل!', 'Copied transfer number/link!'));
+                              }}
+                              className="px-3.5 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/40 text-cyan-300 text-xs font-bold flex items-center gap-1.5 transition-all"
+                            >
+                              {copiedId === 'checkout_payment_copy' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                              <span>{copiedId === 'checkout_payment_copy' ? tr('تم النسخ', 'Copied') : 'Copy'}</span>
+                            </button>
+
+                            {selectedPaymentObj.isUrl && (
+                              <a
+                                href={selectedPaymentObj.transferValue}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-300 text-[11px] font-bold flex items-center justify-center gap-1"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                <span>{tr('فتح الرابط', 'Open Link')}</span>
+                              </a>
+                            )}
+                          </div>
+
+                          <div className="text-right min-w-0 flex-1">
+                            <span className="text-xs text-slate-400 font-bold block">{selectedPaymentObj.titleAr}</span>
+                            <span
+                              dir="ltr"
+                              className="font-mono font-black text-base sm:text-lg text-cyan-400 tracking-wide block break-all my-0.5"
+                            >
+                              {selectedPaymentObj.transferValue}
+                            </span>
+                            <span className="text-xs font-bold text-emerald-400 flex items-center justify-end gap-1">
+                              <span>{tr('اسم المستلم:', 'Recipient:')} {selectedPaymentObj.recipientName}</span>
+                              <User className="w-3.5 h-3.5" />
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Full Name */}
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-300 text-right">
+                          {tr('الاسم الكامل', 'Full Name')} <span className="text-rose-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            required
+                            value={checkoutForm.customerName}
+                            onChange={(e) => setCheckoutForm({ ...checkoutForm, customerName: e.target.value })}
+                            placeholder={tr('أدخل اسمك الكامل', 'Enter your full name')}
+                            className="w-full px-4 py-3 pr-10 rounded-2xl bg-[#080d1a] border border-white/15 text-sm text-white text-right placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                          />
+                          <User className="w-4 h-4 text-slate-500 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                        </div>
+                      </div>
+
+                      {/* WhatsApp Number */}
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-slate-300 text-right">
+                          {tr('رقم الواتساب للتواصل واستلام الحساب', 'WhatsApp Number')} <span className="text-rose-500">*</span>
+                        </label>
                         <input
                           type="tel"
                           required
@@ -2600,43 +3284,90 @@ ${itemsLines}
                           value={checkoutForm.whatsappNumber}
                           onChange={(e) => setCheckoutForm({ ...checkoutForm, whatsappNumber: e.target.value })}
                           placeholder="01012345678"
-                          className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-sm text-white font-mono"
+                          className="w-full px-4 py-3 rounded-2xl bg-[#080d1a] border border-white/15 text-sm text-white font-mono text-right placeholder-slate-500 focus:outline-none focus:border-cyan-400"
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">{tr('طريقة الدفع', 'Payment Method')}</label>
-                        <div className="py-3 px-4 rounded-xl text-xs font-bold bg-blue-600/20 border border-blue-500 text-white text-center">
-                          {tr('فودافون كاش / إنستا باي', 'Vodafone Cash / InstaPay')}
+                      {/* Payment Confirmation Screenshot Upload (صورة الدفع) */}
+                      <div className="space-y-2">
+                        <label className="block text-xs font-bold text-slate-300 text-right">
+                          {tr('صورة الدفع', 'Payment Screenshot')} <span className="text-rose-500">*</span>
+                        </label>
+
+                        <div className="px-4 py-2.5 rounded-xl bg-[#081221] border border-cyan-500/25 text-xs text-slate-300 flex items-center justify-end gap-2">
+                          <span>{tr('سيتم حفظ الصورة وإرسال تفاصيلها مع الطلب في واتساب أو ماسنجر', 'Photo will be attached to your order for WhatsApp / Messenger')}</span>
+                          <Upload className="w-4 h-4 text-cyan-400 shrink-0" />
+                        </div>
+
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={handleReceiptFileChange}
+                          className="hidden"
+                        />
+
+                        <div
+                          onClick={() => fileInputRef.current?.click()}
+                          className="cursor-pointer rounded-2xl border-2 border-dashed border-cyan-500/35 hover:border-cyan-400 bg-[#070d19] p-6 text-center space-y-3 transition-all"
+                        >
+                          {checkoutForm.receiptImage ? (
+                            <div className="space-y-2">
+                              <img
+                                src={checkoutForm.receiptImage}
+                                alt="Receipt Preview"
+                                className="w-32 h-32 object-cover mx-auto rounded-xl border border-cyan-400/50 shadow-lg"
+                              />
+                              <p className="text-xs font-bold text-emerald-400">
+                                ✓ {checkoutForm.receiptFileName || tr('تم اختيار صورة التحويل بنجاح', 'Screenshot attached')}
+                              </p>
+                              <span className="inline-block px-4 py-1.5 rounded-xl bg-slate-800 text-xs text-cyan-300 font-bold">
+                                {tr('تغيير الصورة', 'Change Photo')}
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mx-auto text-cyan-400">
+                                <Upload className="w-6 h-6" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-black text-white">{tr('ارفع صورة تأكيد الدفع', 'Upload Payment Confirmation Screenshot')}</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">PNG, JPG, WEBP • Click or drag & drop</p>
+                              </div>
+                              <button
+                                type="button"
+                                className="px-5 py-2 rounded-xl bg-[#0c243c] border border-cyan-500/40 text-cyan-300 text-xs font-bold hover:bg-cyan-600 hover:text-slate-950 transition-all"
+                              >
+                                {tr('اختر صورة', 'Choose Image')}
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
 
-                      <label className="flex items-start gap-3 p-3.5 rounded-2xl bg-slate-950 border border-white/10 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={checkoutForm.agreedToRules}
-                          onChange={(e) => setCheckoutForm({ ...checkoutForm, agreedToRules: e.target.checked })}
-                          className="mt-1 rounded text-blue-600 focus:ring-0"
-                        />
-                        <span className="text-xs text-slate-300 leading-relaxed">
-                          {tr(
-                            'أوافق وأقر بأنني أفهم أن الحساب الأساسي (Primary) يتم تفعيله لمشاركة الجهاز، بينما الثانوي (Secondary) يتم اللعب به من داخل الحساب المرسل.',
-                            'I agree to the Primary & Secondary terms.'
-                          )}
-                        </span>
-                      </label>
-
-                      <div className="p-4 rounded-2xl bg-blue-950/30 border border-blue-500/30 flex items-center justify-between">
-                        <span className="text-xs text-slate-300">{tr('الإجمالي المطلوب:', 'Total Due:')}</span>
-                        <span className="text-2xl font-black text-white">{formatEGP(cartTotals.subtotal, lang)}</span>
+                      {/* Order Summary Box */}
+                      <div className="p-4 rounded-2xl bg-[#080d1a] border border-white/10 space-y-2">
+                        <span className="block text-xs font-bold text-slate-400 text-right">{tr('ملخص الطلب', 'Order Summary')}</span>
+                        {appliedPromo && (
+                          <div className="flex items-center justify-between text-xs text-emerald-400 font-bold">
+                            <span>-{formatEGP(cartTotals.promoDiscount, lang)}</span>
+                            <span>كود الخصم ({appliedPromo.code})</span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-xl font-black text-cyan-400">{formatEGP(cartTotals.finalTotal, lang)}</span>
+                          <span className="text-xs text-slate-300 font-bold">{tr('الإجمالي المطلوب تحويله:', 'Total to Transfer:')}</span>
+                        </div>
                       </div>
 
                       <button
                         type="submit"
                         disabled={submittingOrder}
-                        className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-black text-sm shadow-lg"
+                        className="w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-sm shadow-xl transition-all"
                       >
-                        {submittingOrder ? tr('جاري التسجيل...', 'Submitting...') : tr(`تأكيد الطلب (${formatEGP(cartTotals.subtotal, lang)})`, 'Confirm Order')}
+                        {submittingOrder
+                          ? tr('جاري تسجيل الطلب...', 'Submitting Order...')
+                          : tr(`تأكيد الطلب وإرسال التحويل (${formatEGP(cartTotals.finalTotal, lang)})`, `Confirm Order (${formatEGP(cartTotals.finalTotal, lang)})`)}
                       </button>
                     </form>
                   </div>
