@@ -21,6 +21,12 @@
       margin: 0;
       padding: 0;
     }
+    html { -webkit-text-size-adjust: 100%; }
+    body { overflow-x: hidden; }
+    /* 16px inputs stop iOS Safari from zooming the page when a field is focused */
+    @media (max-width: 820px) {
+      input, select, textarea { font-size: 16px !important; }
+    }
     ::-webkit-scrollbar {
       width: 8px;
       height: 8px;
@@ -87,13 +93,28 @@
       Smartphone, Monitor, User, Upload, Image as ImageIcon, Tag, Wallet
     } from 'lucide-react';
 
+    // ============================================================
+    // PASTE YOUR FIREBASE WEB APP CONFIG HERE (Firebase Console ->
+    // Project settings -> Your apps -> Web app -> firebaseConfig).
+    // Without it the store runs in LOCAL mode: orders are saved only
+    // in the browser that placed them and are NOT visible on other devices.
+    // ============================================================
+    const MY_FIREBASE_CONFIG = {
+      apiKey: "AIzaSyAOJ_pVLTsB3vEB2aSF8c8JwPPqP-N6QlQ",
+      authDomain: "bonkastore-a06f7.firebaseapp.com",
+      projectId: "bonkastore-a06f7",
+      storageBucket: "bonkastore-a06f7.firebasestorage.app",
+      messagingSenderId: "499784591260",
+      appId: "1:499784591260:web:16b66b8335cbc64e14ca59"
+    };
+
     let firebaseConfig = {};
     try {
       firebaseConfig = typeof window.__firebase_config !== 'undefined' 
         ? JSON.parse(window.__firebase_config) 
-        : {};
+        : MY_FIREBASE_CONFIG;
     } catch (e) {
-      firebaseConfig = {};
+      firebaseConfig = MY_FIREBASE_CONFIG;
     }
     const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'ps-vault-store-app';
     const hasValidFirebase = Boolean(firebaseConfig && firebaseConfig.apiKey);
@@ -477,6 +498,13 @@
       const tr = (arText, enText) => (lang === 'ar' ? arText : enText);
 
       const [previewDevice, setPreviewDevice] = useState('pc');
+      const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 820);
+      useEffect(() => {
+        const onResize = () => setIsNarrow(window.innerWidth < 820);
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+      }, []);
+      const compact = previewDevice === 'mobile' || isNarrow;
       const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
         try {
           return sessionStorage.getItem('bonka_admin_unlocked') === 'true';
@@ -1861,6 +1889,13 @@ ${itemsLines}
                     <span>{tr('وضع الإدارة مفعل:', 'Admin Mode Active:')}</span>
                   </span>
 
+                  {!hasValidFirebase && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[11px] font-bold">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>{tr('وضع محلي: الطلبات لا تظهر على الأجهزة الأخرى (Firebase غير مفعّل)', 'Local mode: orders are NOT shared across devices (Firebase not configured)')}</span>
+                    </span>
+                  )}
+
                   <button
                     onClick={handleAdminLogout}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/30 text-[11px] font-bold transition-all"
@@ -1925,7 +1960,7 @@ ${itemsLines}
 
               {/* Toast */}
               {toast && (
-                <div className={`fixed bottom-6 ${isAr ? 'right-6' : 'left-6'} z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border backdrop-blur-xl animate-bounce bg-slate-900/95 border-cyan-500/40 text-white max-w-md`}>
+                <div className={`fixed bottom-6 ${isAr ? 'right-6' : 'left-6'} z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl border backdrop-blur-xl animate-bounce bg-slate-900/95 border-cyan-500/40 text-white max-w-[calc(100vw-3rem)] sm:max-w-md`}>
                   {toast.type === 'error' ? (
                     <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
                   ) : toast.type === 'info' ? (
@@ -1939,24 +1974,24 @@ ${itemsLines}
 
               {/* Navbar */}
               <header className="sticky top-0 z-40 border-b border-white/10 bg-[#060913]/85 backdrop-blur-xl">
-                <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${previewDevice === 'mobile' ? 'py-3 flex-wrap' : 'h-20'} flex items-center justify-between gap-3`}>
+                <div className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${compact ? 'py-3 flex-wrap' : 'h-20'} flex items-center justify-between gap-3`}>
                   <div 
                     onClick={() => setActiveTab('store')}
                     className="flex items-center gap-2.5 cursor-pointer group shrink-0 select-none"
                   >
-                    <div className={`${previewDevice === 'mobile' ? 'w-9 h-9' : 'w-11 h-11'} rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-800 flex items-center justify-center shadow-lg shadow-blue-600/30 group-hover:scale-105 transition-transform`}>
-                      <Gamepad2 className={`${previewDevice === 'mobile' ? 'w-5 h-5' : 'w-6 h-6'} text-white`} />
+                    <div className={`${compact ? 'w-9 h-9' : 'w-11 h-11'} rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-800 flex items-center justify-center shadow-lg shadow-blue-600/30 group-hover:scale-105 transition-transform`}>
+                      <Gamepad2 className={`${compact ? 'w-5 h-5' : 'w-6 h-6'} text-white`} />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className={`font-extrabold ${previewDevice === 'mobile' ? 'text-base' : 'text-lg sm:text-xl'} tracking-tight bg-gradient-to-r from-white via-blue-100 to-blue-400 bg-clip-text text-transparent`}>
+                        <span className={`font-extrabold ${compact ? 'text-base' : 'text-lg sm:text-xl'} tracking-tight bg-gradient-to-r from-white via-blue-100 to-blue-400 bg-clip-text text-transparent`}>
                           BONKA STORE
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  <nav className={`flex items-center gap-1 bg-slate-900/90 p-1 rounded-2xl border border-white/10 ${previewDevice === 'mobile' ? 'order-3 w-full justify-around mt-1' : ''}`}>
+                  <nav className={`flex items-center gap-1 bg-slate-900/90 p-1 rounded-2xl border border-white/10 ${compact ? 'order-3 w-full justify-around mt-1 overflow-x-auto' : ''}`}>
                     <button
                       onClick={() => setActiveTab('store')}
                       className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all flex items-center gap-1.5 ${
@@ -2012,7 +2047,7 @@ ${itemsLines}
                         setLang(nextLang);
                         showToast(nextLang === 'en' ? 'Switched language to English' : 'تم تغيير اللغة إلى العربية', 'info');
                       }}
-                      className="flex items-center gap-1.5 px-3 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-white/15 text-xs font-extrabold text-white transition-all shadow-sm"
+                      className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-white/15 text-xs font-extrabold text-white transition-all shadow-sm"
                     >
                       <Globe className="w-4 h-4 text-blue-400" />
                       <span>{lang === 'ar' ? 'EN' : 'عربي'}</span>
@@ -2056,18 +2091,18 @@ ${itemsLines}
               </header>
 
               {/* Main Container */}
-              <main className={`relative z-10 max-w-7xl mx-auto ${previewDevice === 'mobile' ? 'px-3 py-4' : 'px-4 sm:px-6 lg:px-8 py-8'}`}>
+              <main className={`relative z-10 max-w-7xl mx-auto ${compact ? 'px-3 py-4' : 'px-4 sm:px-6 lg:px-8 py-8'}`}>
                 {activeTab === 'store' && (
                   <div className="space-y-8">
                     {/* Hero */}
-                    <div className={`relative rounded-3xl overflow-hidden border border-white/10 bg-gradient-to-br from-slate-900 via-[#0b132b] to-indigo-950 ${previewDevice === 'mobile' ? 'p-4' : 'p-6 sm:p-10'} shadow-2xl`}>
-                      <div className={`grid grid-cols-1 ${previewDevice === 'mobile' ? 'gap-5' : 'lg:grid-cols-12 gap-8'} items-center`}>
-                        <div className={`${previewDevice === 'mobile' ? '' : 'lg:col-span-7'} space-y-4`}>
+                    <div className={`relative rounded-3xl overflow-hidden border border-white/10 bg-gradient-to-br from-slate-900 via-[#0b132b] to-indigo-950 ${compact ? 'p-4' : 'p-6 sm:p-10'} shadow-2xl`}>
+                      <div className={`grid grid-cols-1 ${compact ? 'gap-5' : 'lg:grid-cols-12 gap-8'} items-center`}>
+                        <div className={`${compact ? '' : 'lg:col-span-7'} space-y-4`}>
                           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-400/30 text-blue-300 text-[11px] font-semibold">
                             <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                             <span>{tr('تسليم فوري للـ QR Code • خصومات حتى 75%', 'Instant QR Code Delivery • Up to 75% Off')}</span>
                           </div>
-                          <h1 className={`${previewDevice === 'mobile' ? 'text-2xl' : 'text-3xl sm:text-5xl'} font-black tracking-tight text-white leading-tight`}>
+                          <h1 className={`${compact ? 'text-2xl' : 'text-3xl sm:text-5xl'} font-black tracking-tight text-white leading-tight`}>
                             {tr('العب أقوى ألعاب PS4 و PS5 ', 'Play Top PS4 & PS5 Games ')}
                             <span className="bg-gradient-to-r from-blue-400 via-cyan-300 to-indigo-400 bg-clip-text text-transparent">
                               {tr('بأقل الأسعار في مصر والوطن العربي.', 'At the Best Prices.')}
@@ -2081,7 +2116,7 @@ ${itemsLines}
                           </p>
 
                           <div className="pt-2 flex flex-col sm:flex-row sm:items-center gap-3">
-                            <div className={`inline-flex p-1.5 rounded-2xl bg-slate-950/90 border border-white/15 ${previewDevice === 'mobile' ? 'flex-col w-full gap-1' : ''}`}>
+                            <div className={`inline-flex p-1.5 rounded-2xl bg-slate-950/90 border border-white/15 ${compact ? 'flex-col w-full gap-1' : ''}`}>
                               <button
                                 onClick={() => handleGlobalLicenseSwitch('Primary')}
                                 className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
@@ -2112,7 +2147,7 @@ ${itemsLines}
                           </div>
                         </div>
 
-                        <div className={previewDevice === 'mobile' ? '' : 'lg:col-span-5'}>
+                        <div className={compact ? '' : 'lg:col-span-5'}>
                           <div className="rounded-2xl bg-slate-950/80 border border-white/10 p-5 space-y-4 backdrop-blur-md">
                             <div className="flex items-center justify-between border-b border-white/10 pb-3">
                               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
@@ -2225,7 +2260,7 @@ ${itemsLines}
                         </button>
                       </div>
                     ) : (
-                      <div className={`grid grid-cols-1 ${previewDevice === 'mobile' ? 'gap-4' : 'md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'}`}>
+                      <div className={`grid grid-cols-1 ${compact ? 'gap-4' : 'md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'}`}>
                         {filteredGames.map((game) => {
                           const selectedLicense = getSelectedLicenseForGame(game.id);
                           const activePrice = selectedLicense === 'Primary' 
@@ -2442,4 +2477,919 @@ ${itemsLines}
                                   <p className="text-xs text-slate-300">
                                     {tr('اضغط على واتساب أو ماسنجر لإرسال رقم الطلب ورابط صورة التحويل للإدارة واستلام الـ QR Code فوراً.', 'Confirm via WhatsApp or Messenger to receive your QR Code.')}
                                   </p>
-                                  <div className="
+                                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                    <button
+                                      onClick={() => handleConfirmViaWhatsApp(order)}
+                                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all"
+                                    >
+                                      <PhoneCall className="w-3.5 h-3.5" />
+                                      <span>{tr('تأكيد عبر واتساب', 'Confirm via WhatsApp')}</span>
+                                    </button>
+                                    <button
+                                      onClick={() => handleConfirmViaMessenger(order)}
+                                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all"
+                                    >
+                                      <MessageCircle className="w-3.5 h-3.5" />
+                                      <span>{tr('تأكيد عبر ماسنجر', 'Confirm via Messenger')}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="p-6 space-y-4">
+                                {order.credentialsUnlocked ? (
+                                  parsedAccounts.length === 0 ? (
+                                    <p className="text-xs text-slate-400">{tr('لا توجد بيانات حسابات لهذا الطلب.', 'No account data for this order.')}</p>
+                                  ) : (
+                                    parsedAccounts.map((acc, idx) => (
+                                      <div key={idx} className="rounded-2xl bg-slate-950/80 border border-white/10 p-4 space-y-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                          <div className="flex items-center gap-3 min-w-0">
+                                            {acc.image && (
+                                              <img src={acc.image} alt={acc.title} className="w-12 h-12 rounded-xl object-cover shrink-0" />
+                                            )}
+                                            <div className="min-w-0">
+                                              <h4 className="font-bold text-sm text-white truncate">{acc.title}</h4>
+                                              <span className="text-[11px] text-slate-400">{acc.console} • {acc.licenseType === 'Primary' ? tr('أساسي', 'Primary') : tr('ثانوي', 'Secondary')}</span>
+                                            </div>
+                                          </div>
+                                          <span className="text-xs font-bold text-emerald-400 shrink-0">{formatEGP(acc.pricePaid, lang)}</span>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs" dir="ltr">
+                                          {[
+                                            { label: 'PSN Email', value: acc.psnEmail },
+                                            { label: 'Password', value: acc.psnPassword },
+                                            { label: '2-Step Code', value: acc.twoStepCode }
+                                          ].map((f) => (
+                                            <div key={f.label} className="rounded-xl bg-slate-900 border border-white/10 p-2.5 flex items-center justify-between gap-2">
+                                              <div className="min-w-0">
+                                                <span className="block text-[10px] text-slate-500">{f.label}</span>
+                                                <span className="font-mono text-slate-100 break-all">{f.value || '—'}</span>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => copyTextToClipboard(f.value || '', `${order.id}_${idx}_${f.label}`)}
+                                                className="p-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white transition-colors shrink-0"
+                                              >
+                                                {copiedId === `${order.id}_${idx}_${f.label}` ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                                              </button>
+                                            </div>
+                                          ))}
+                                        </div>
+
+                                        {acc.activationInstructions && (
+                                          <p className="text-[11px] text-slate-400 leading-relaxed whitespace-pre-line">{acc.activationInstructions}</p>
+                                        )}
+                                      </div>
+                                    ))
+                                  )
+                                ) : (
+                                  <div className="rounded-2xl bg-slate-950/60 border border-dashed border-white/15 p-6 text-center space-y-2">
+                                    <Lock className="w-8 h-8 text-slate-500 mx-auto" />
+                                    <p className="text-sm font-bold text-slate-300">{tr('بيانات الحساب مقفلة حتى تأكيد الإدارة', 'Account details are locked until admin confirmation')}</p>
+                                  </div>
+                                )}
+
+                                {(order.receiptImage || order.receiptHostedUrl) && (
+                                  <button
+                                    onClick={() => setReceiptPreviewModal(order.receiptImage || order.receiptHostedUrl)}
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300"
+                                  >
+                                    <ImageIcon className="w-4 h-4" />
+                                    <span>{tr('عرض إيصال التحويل', 'View transfer receipt')}</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'admin' && !isCustomerViewOnly && (
+                  <div className="space-y-6 max-w-6xl mx-auto">
+                    <div className="flex flex-wrap items-center gap-2 bg-slate-900 p-1.5 rounded-2xl border border-white/10">
+                      {[
+                        { id: 'inventory', ar: 'المخزون', en: 'Inventory' },
+                        { id: 'add', ar: editingGameId ? 'تعديل لعبة' : 'إضافة لعبة', en: editingGameId ? 'Edit Game' : 'Add Game' },
+                        { id: 'vault', ar: 'خزنة الحسابات', en: 'Account Vault' },
+                        { id: 'orders', ar: 'الطلبات', en: 'Orders' },
+                        { id: 'promos', ar: 'أكواد الخصم', en: 'Promo Codes' },
+                        { id: 'settings', ar: 'الإعدادات', en: 'Settings' }
+                      ].map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => setAdminSubTab(t.id)}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                            adminSubTab === t.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-300 hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          {tr(t.ar, t.en)}
+                        </button>
+                      ))}
+                    </div>
+
+                    {adminSubTab === 'inventory' && (
+                      <div className="rounded-3xl bg-slate-900/80 border border-white/10 overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead className="bg-slate-950 text-slate-400">
+                              <tr>
+                                <th className="p-3 text-start">{tr('اللعبة', 'Game')}</th>
+                                <th className="p-3 text-start">{tr('الجهاز', 'Console')}</th>
+                                <th className="p-3 text-start">{tr('أساسي', 'Primary')}</th>
+                                <th className="p-3 text-start">{tr('ثانوي', 'Secondary')}</th>
+                                <th className="p-3 text-start">{tr('إجراءات', 'Actions')}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {games.map((g) => (
+                                <tr key={g.id} className="border-t border-white/5">
+                                  <td className="p-3 font-bold text-white">{g.title}</td>
+                                  <td className="p-3 text-slate-300">{g.console}</td>
+                                  <td className="p-3 text-blue-300">{formatEGP(g.primaryPrice, lang)} <span className="text-slate-500">({g.primaryStock})</span></td>
+                                  <td className="p-3 text-purple-300">{formatEGP(g.secondaryPrice, lang)} <span className="text-slate-500">({g.secondaryStock})</span></td>
+                                  <td className="p-3">
+                                    <div className="flex items-center gap-2">
+                                      <button onClick={() => startEditGame(g)} className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white font-bold transition-colors">
+                                        {tr('تعديل', 'Edit')}
+                                      </button>
+                                      <button onClick={() => setGameToDeleteModal(g)} className="p-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white transition-colors">
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {adminSubTab === 'add' && (
+                      <form onSubmit={handleSaveGame} className="rounded-3xl bg-slate-900/80 border border-white/10 p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <h3 className="md:col-span-2 text-lg font-black text-white">
+                          {editingGameId ? tr('تعديل اللعبة', 'Edit Game') : tr('إضافة لعبة جديدة', 'Add New Game')}
+                        </h3>
+                        {[
+                          { key: 'title', label: tr('اسم اللعبة', 'Title'), type: 'text', required: true },
+                          { key: 'genre', label: tr('التصنيف', 'Genre'), type: 'text' },
+                          { key: 'badge', label: tr('الشارة', 'Badge'), type: 'text' },
+                          { key: 'rating', label: tr('التقييم', 'Rating'), type: 'number', step: '0.05' },
+                          { key: 'releaseYear', label: tr('سنة الإصدار', 'Release Year'), type: 'number' },
+                          { key: 'primaryPrice', label: tr('سعر الأساسي', 'Primary Price'), type: 'number' },
+                          { key: 'secondaryPrice', label: tr('سعر الثانوي', 'Secondary Price'), type: 'number' },
+                          { key: 'retailPrice', label: tr('السعر الأصلي', 'Retail Price'), type: 'number' },
+                          { key: 'primaryStock', label: tr('مخزون الأساسي', 'Primary Stock'), type: 'number' },
+                          { key: 'secondaryStock', label: tr('مخزون الثانوي', 'Secondary Stock'), type: 'number' }
+                        ].map((f) => (
+                          <label key={f.key} className="space-y-1 block">
+                            <span className="text-[11px] font-semibold text-slate-400">{f.label}</span>
+                            <input
+                              type={f.type}
+                              step={f.step}
+                              required={f.required}
+                              value={gameForm[f.key]}
+                              onChange={(e) => setGameForm((p) => ({ ...p, [f.key]: e.target.value }))}
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                            />
+                          </label>
+                        ))}
+                        <label className="space-y-1 block">
+                          <span className="text-[11px] font-semibold text-slate-400">{tr('الجهاز', 'Console')}</span>
+                          <select
+                            value={gameForm.console}
+                            onChange={(e) => setGameForm((p) => ({ ...p, console: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                          >
+                            <option value="PS5">PS5</option>
+                            <option value="PS4">PS4</option>
+                            <option value="PS4 & PS5">PS4 &amp; PS5</option>
+                          </select>
+                        </label>
+                        <label className="flex items-center gap-2 self-end pb-2.5">
+                          <input
+                            type="checkbox"
+                            checked={gameForm.featured}
+                            onChange={(e) => setGameForm((p) => ({ ...p, featured: e.target.checked }))}
+                          />
+                          <span className="text-xs font-semibold text-slate-300">{tr('لعبة مميزة', 'Featured')}</span>
+                        </label>
+                        <label className="space-y-1 block md:col-span-2">
+                          <span className="text-[11px] font-semibold text-slate-400">{tr('رابط الصورة', 'Image URL')}</span>
+                          <input
+                            type="text"
+                            value={gameForm.image}
+                            onChange={(e) => setGameForm((p) => ({ ...p, image: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                            dir="ltr"
+                          />
+                        </label>
+                        <label className="space-y-1 block md:col-span-2">
+                          <span className="text-[11px] font-semibold text-slate-400">{tr('الوصف', 'Description')}</span>
+                          <textarea
+                            rows={3}
+                            value={gameForm.description}
+                            onChange={(e) => setGameForm((p) => ({ ...p, description: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                          />
+                        </label>
+                        <div className="md:col-span-2 flex items-center gap-3">
+                          <button type="submit" className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all">
+                            {tr('حفظ اللعبة', 'Save Game')}
+                          </button>
+                          {editingGameId && (
+                            <button
+                              type="button"
+                              onClick={() => { resetGameForm(); setAdminSubTab('inventory'); }}
+                              className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-bold transition-all"
+                            >
+                              {tr('إلغاء', 'Cancel')}
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                    )}
+
+                    {adminSubTab === 'vault' && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <form onSubmit={handleAddAccountToVault} className="rounded-3xl bg-slate-900/80 border border-white/10 p-6 space-y-4">
+                          <h3 className="text-lg font-black text-white">{tr('إضافة حساب للخزنة', 'Add Account to Vault')}</h3>
+                          <select
+                            required
+                            value={vaultForm.gameId}
+                            onChange={(e) => setVaultForm((p) => ({ ...p, gameId: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                          >
+                            <option value="">{tr('اختر اللعبة...', 'Select a game...')}</option>
+                            {games.map((g) => (
+                              <option key={g.id} value={g.id}>{g.title}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={vaultForm.licenseType}
+                            onChange={(e) => setVaultForm((p) => ({ ...p, licenseType: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                          >
+                            <option value="Primary">{tr('أساسي', 'Primary')}</option>
+                            <option value="Secondary">{tr('ثانوي', 'Secondary')}</option>
+                          </select>
+                          {[
+                            { key: 'psnEmail', label: 'PSN Email' },
+                            { key: 'psnPassword', label: 'PSN Password' },
+                            { key: 'twoStepCode', label: '2-Step Code' }
+                          ].map((f) => (
+                            <input
+                              key={f.key}
+                              type="text"
+                              dir="ltr"
+                              required={f.key !== 'twoStepCode'}
+                              placeholder={f.label}
+                              value={vaultForm[f.key]}
+                              onChange={(e) => setVaultForm((p) => ({ ...p, [f.key]: e.target.value }))}
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                            />
+                          ))}
+                          <textarea
+                            rows={2}
+                            placeholder={tr('ملاحظات / تعليمات التفعيل', 'Notes / activation instructions')}
+                            value={vaultForm.notes}
+                            onChange={(e) => setVaultForm((p) => ({ ...p, notes: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                          />
+                          <button type="submit" className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all">
+                            {tr('حفظ في الخزنة', 'Save to Vault')}
+                          </button>
+                        </form>
+
+                        <div className="rounded-3xl bg-slate-900/80 border border-white/10 p-6 space-y-3 max-h-[560px] overflow-y-auto">
+                          <h3 className="text-lg font-black text-white">{tr('الحسابات المخزنة', 'Stored Accounts')} ({accountPool.length})</h3>
+                          {accountPool.length === 0 && (
+                            <p className="text-xs text-slate-400">{tr('لا توجد حسابات مخزنة.', 'No stored accounts.')}</p>
+                          )}
+                          {accountPool.map((acc) => (
+                            <div key={acc.id} className="rounded-2xl bg-slate-950 border border-white/10 p-3 flex items-center justify-between gap-3">
+                              <div className="min-w-0 text-xs" dir="ltr">
+                                <div className="font-bold text-white truncate">{acc.gameTitle} • {acc.licenseType}</div>
+                                <div className="text-slate-400 truncate">{acc.psnEmail}</div>
+                                <div className={acc.status === 'available' ? 'text-emerald-400' : 'text-amber-400'}>{acc.status}</div>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteVaultAccount(acc)}
+                                className="p-2 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white transition-colors shrink-0"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {adminSubTab === 'orders' && (
+                      <div className="space-y-4">
+                        {orders.length === 0 ? (
+                          <div className="rounded-3xl bg-slate-900/60 border border-white/10 p-10 text-center text-sm text-slate-400">
+                            {tr('لا توجد طلبات بعد.', 'No orders yet.')}
+                          </div>
+                        ) : (
+                          orders.map((order) => (
+                            <div key={order.id} className="rounded-3xl bg-slate-900/90 border border-white/10 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                              <div className="space-y-1 text-xs">
+                                <div className="font-mono font-bold text-sm text-cyan-400">{order.orderNumber}</div>
+                                <div className="text-white font-bold">{order.customerName} {order.whatsappNumber ? `• ${order.whatsappNumber}` : ''}</div>
+                                <div className="text-slate-400">{getPaymentMethodLabel(order.paymentMethod)} • {formatEGP(order.totalAmount, lang)}</div>
+                                <div className={order.credentialsUnlocked ? 'text-emerald-400' : 'text-amber-400'}>{order.status}</div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                {(order.receiptImage || order.receiptHostedUrl) && (
+                                  <button
+                                    onClick={() => setReceiptPreviewModal(order.receiptImage || order.receiptHostedUrl)}
+                                    className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all"
+                                  >
+                                    {tr('الإيصال', 'Receipt')}
+                                  </button>
+                                )}
+                                {!order.credentialsUnlocked && (
+                                  <button
+                                    onClick={() => handleAdminApproveAndUnlockOrder(order)}
+                                    className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all"
+                                  >
+                                    {tr('تأكيد وفتح', 'Approve & Unlock')}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => openManageOrderCredentials(order)}
+                                  className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all"
+                                >
+                                  {tr('إدارة البيانات', 'Manage Credentials')}
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+
+                    {adminSubTab === 'promos' && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <form onSubmit={handleAddPromoCode} className="rounded-3xl bg-slate-900/80 border border-white/10 p-6 space-y-4">
+                          <h3 className="text-lg font-black text-white">{tr('إضافة كود خصم', 'Add Promo Code')}</h3>
+                          <input
+                            type="text"
+                            dir="ltr"
+                            placeholder="CODE"
+                            value={newPromoForm.code}
+                            onChange={(e) => setNewPromoForm((p) => ({ ...p, code: e.target.value }))}
+                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white uppercase focus:outline-none focus:border-blue-500"
+                          />
+                          <div className="grid grid-cols-2 gap-3">
+                            <select
+                              value={newPromoForm.discountType}
+                              onChange={(e) => setNewPromoForm((p) => ({ ...p, discountType: e.target.value }))}
+                              className="px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                            >
+                              <option value="percent">{tr('نسبة %', 'Percent %')}</option>
+                              <option value="fixed">{tr('مبلغ ثابت', 'Fixed amount')}</option>
+                            </select>
+                            <input
+                              type="number"
+                              min="1"
+                              value={newPromoForm.discountValue}
+                              onChange={(e) => setNewPromoForm((p) => ({ ...p, discountValue: e.target.value }))}
+                              className="px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+                          <button type="submit" className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all">
+                            {tr('إضافة', 'Add')}
+                          </button>
+                        </form>
+
+                        <div className="rounded-3xl bg-slate-900/80 border border-white/10 p-6 space-y-3">
+                          <h3 className="text-lg font-black text-white">{tr('الأكواد الحالية', 'Active Codes')}</h3>
+                          {promoCodes.map((p) => (
+                            <div key={p.id} className="rounded-2xl bg-slate-950 border border-white/10 p-3 flex items-center justify-between gap-3">
+                              <div className="text-xs">
+                                <span className="font-mono font-bold text-cyan-400">{p.code}</span>
+                                <span className="text-slate-400"> • {p.discountType === 'percent' ? `${p.discountValue}%` : formatEGP(p.discountValue, lang)}</span>
+                              </div>
+                              <button
+                                onClick={() => handleDeletePromoCode(p)}
+                                className="p-2 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {adminSubTab === 'settings' && (
+                      <form onSubmit={handleSaveStoreSettings} className="rounded-3xl bg-slate-900/80 border border-white/10 p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <h3 className="md:col-span-2 text-lg font-black text-white">{tr('إعدادات المتجر', 'Store Settings')}</h3>
+                        {[
+                          { key: 'whatsappNumber', label: tr('رقم واتساب', 'WhatsApp Number') },
+                          { key: 'storePageUrl', label: tr('رابط ماسنجر / صفحة فيسبوك', 'Messenger / Facebook Page URL') },
+                          { key: 'vfcNumber', label: tr('رقم فودافون كاش', 'Vodafone Cash Number') },
+                          { key: 'vfcRecipient', label: tr('اسم مستلم فودافون كاش', 'Vodafone Cash Recipient') },
+                          { key: 'instapayAccount', label: tr('حساب إنستاباي', 'InstaPay Account') },
+                          { key: 'instapayRecipient', label: tr('اسم مستلم إنستاباي', 'InstaPay Recipient') },
+                          { key: 'teldaAccount', label: tr('حساب تيلدا', 'Telda Account') },
+                          { key: 'teldaRecipient', label: tr('اسم مستلم تيلدا', 'Telda Recipient') },
+                          { key: 'adminPin', label: tr('الكود السري للإدارة', 'Secret Admin Code') }
+                        ].map((f) => (
+                          <label key={f.key} className="space-y-1 block">
+                            <span className="text-[11px] font-semibold text-slate-400">{f.label}</span>
+                            <input
+                              type="text"
+                              dir="ltr"
+                              value={storeConfig[f.key] || ''}
+                              onChange={(e) => setStoreConfig((p) => ({ ...p, [f.key]: e.target.value }))}
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-white/10 text-sm text-white focus:outline-none focus:border-blue-500"
+                            />
+                          </label>
+                        ))}
+                        <div className="md:col-span-2">
+                          <button type="submit" className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all">
+                            {tr('حفظ الإعدادات', 'Save Settings')}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </main>
+
+              {/* Footer */}
+              <footer className="relative z-10 border-t border-white/10 mt-12 py-8 text-center text-xs text-slate-500">
+                <p>© {new Date().getFullYear()} Bonka Store — {tr('جميع الحقوق محفوظة', 'All rights reserved')}</p>
+              </footer>
+
+              {/* Cart Drawer */}
+              {cartOpen && (
+                <div className="fixed inset-0 z-[60] flex">
+                  <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setCartOpen(false)} />
+                  <aside className={`relative z-10 w-full max-w-md bg-slate-950 border-white/10 flex flex-col h-full ${isAr ? 'mr-auto border-r' : 'ml-auto border-l'}`}>
+                    <div className="flex items-center justify-between p-5 border-b border-white/10">
+                      <h3 className="text-lg font-black text-white flex items-center gap-2">
+                        <ShoppingCart className="w-5 h-5 text-blue-400" />
+                        <span>{tr('سلة المشتريات', 'Shopping Cart')}</span>
+                      </h3>
+                      <button onClick={() => setCartOpen(false)} className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                      {cart.length === 0 ? (
+                        <div className="py-16 text-center space-y-3">
+                          <ShoppingCart className="w-12 h-12 text-slate-600 mx-auto" />
+                          <p className="text-sm text-slate-400">{tr('السلة فارغة', 'Your cart is empty')}</p>
+                        </div>
+                      ) : (
+                        cart.map((item) => {
+                          const liveGame = games.find((g) => g.id === item.gameId);
+                          const price = liveGame
+                            ? (item.licenseType === 'Primary' ? normalizeEgpPrice(liveGame.primaryPrice, 1100) : normalizeEgpPrice(liveGame.secondaryPrice, 650))
+                            : normalizeEgpPrice(item.price, 750);
+                          return (
+                            <div key={item.id} className="rounded-2xl bg-slate-900 border border-white/10 p-3 flex items-center gap-3">
+                              <img
+                                src={liveGame?.image || item.image}
+                                alt={item.title}
+                                onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/120x120/0f172a/38bdf8?text=PS'; }}
+                                className="w-16 h-16 rounded-xl object-cover shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-sm font-bold text-white truncate">{liveGame?.title || item.title}</h4>
+                                <span className="text-[11px] text-slate-400">{item.licenseType === 'Primary' ? tr('أساسي', 'Primary') : tr('ثانوي', 'Secondary')}</span>
+                                <div className="flex items-center justify-between mt-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <button onClick={() => updateCartQuantity(item, -1)} className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold">−</button>
+                                    <span className="text-xs font-bold text-white w-4 text-center">{item.quantity}</span>
+                                    <button onClick={() => updateCartQuantity(item, 1)} className="w-6 h-6 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold">+</button>
+                                  </div>
+                                  <span className="text-sm font-black text-white">{formatEGP(price * (Number(item.quantity) || 1), lang)}</span>
+                                </div>
+                              </div>
+                              <button onClick={() => removeFromCart(item.id)} className="p-2 rounded-lg text-rose-400 hover:bg-rose-600/20 transition-colors shrink-0">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {cart.length > 0 && (
+                      <div className="p-5 border-t border-white/10 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1">
+                            <Tag className={`w-4 h-4 text-slate-500 absolute ${isAr ? 'right-3' : 'left-3'} top-1/2 -translate-y-1/2`} />
+                            <input
+                              type="text"
+                              value={promoInput}
+                              onChange={(e) => setPromoInput(e.target.value)}
+                              placeholder={tr('كود الخصم', 'Promo code')}
+                              className={`w-full ${isAr ? 'pr-9 pl-3' : 'pl-9 pr-3'} py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500`}
+                            />
+                          </div>
+                          <button onClick={handleApplyPromoCode} className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all">
+                            {tr('تطبيق', 'Apply')}
+                          </button>
+                        </div>
+
+                        <div className="space-y-1.5 text-sm">
+                          <div className="flex justify-between text-slate-300">
+                            <span>{tr('المجموع', 'Subtotal')}</span>
+                            <span>{formatEGP(cartTotals.subtotal, lang)}</span>
+                          </div>
+                          {cartTotals.promoDiscount > 0 && (
+                            <div className="flex justify-between text-emerald-400">
+                              <span>{tr('خصم', 'Discount')} {appliedPromo ? `(${appliedPromo.code})` : ''}</span>
+                              <span>-{formatEGP(cartTotals.promoDiscount, lang)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between text-lg font-black text-white pt-1.5 border-t border-white/10">
+                            <span>{tr('الإجمالي', 'Total')}</span>
+                            <span>{formatEGP(cartTotals.finalTotal, lang)}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => { setCartOpen(false); setCheckoutModalOpen(true); }}
+                          className="w-full py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 transition-all"
+                        >
+                          <CreditCard className="w-4 h-4" />
+                          <span>{tr('إتمام الطلب', 'Checkout')}</span>
+                        </button>
+                      </div>
+                    )}
+                  </aside>
+                </div>
+              )}
+
+              {/* Checkout Modal */}
+              {checkoutModalOpen && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+                  <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setCheckoutModalOpen(false)} />
+                  <form
+                    onSubmit={handleCompleteCheckout}
+                    className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl bg-slate-950 border border-white/10 p-6 space-y-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-black text-white flex items-center gap-2">
+                        <Wallet className="w-5 h-5 text-blue-400" />
+                        <span>{tr('إتمام الطلب', 'Complete Order')}</span>
+                      </h3>
+                      <button type="button" onClick={() => setCheckoutModalOpen(false)} className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <input
+                      type="text"
+                      required
+                      value={checkoutForm.customerName}
+                      onChange={(e) => setCheckoutForm((p) => ({ ...p, customerName: e.target.value }))}
+                      placeholder={tr('الاسم الكامل', 'Full name')}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+                    <input
+                      type="tel"
+                      dir="ltr"
+                      value={checkoutForm.whatsappNumber}
+                      onChange={(e) => setCheckoutForm((p) => ({ ...p, whatsappNumber: e.target.value }))}
+                      placeholder={tr('رقم واتساب (اختياري)', 'WhatsApp number (optional)')}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    />
+
+                    {/* Payment method */}
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentDropdownOpen((o) => !o)}
+                        className={`w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-slate-900 border ${selectedPaymentObj.borderColor} text-sm text-white`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className={`w-2.5 h-2.5 rounded-full ${selectedPaymentObj.dotColor}`} />
+                          <span>{tr(selectedPaymentObj.titleAr, selectedPaymentObj.titleEn)}</span>
+                        </span>
+                        <ChevronDown className="w-4 h-4 text-slate-400" />
+                      </button>
+                      {paymentDropdownOpen && (
+                        <div className="absolute z-20 mt-1 w-full rounded-xl bg-slate-900 border border-white/10 overflow-hidden shadow-xl">
+                          {paymentMethodsList.map((m) => (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => {
+                                setCheckoutForm((p) => ({ ...p, paymentMethod: m.id }));
+                                setPaymentDropdownOpen(false);
+                              }}
+                              className="w-full flex items-center gap-2 px-3.5 py-2.5 text-sm text-white hover:bg-white/5 text-start"
+                            >
+                              <span className={`w-2.5 h-2.5 rounded-full ${m.dotColor}`} />
+                              <span>{tr(m.titleAr, m.titleEn)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-2xl bg-slate-900 border border-white/10 p-4 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">{tr('حوّل إلى', 'Transfer to')}</span>
+                        <span className="font-bold text-white">{selectedPaymentObj.recipientName}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2" dir="ltr">
+                        <span className={`font-mono break-all ${selectedPaymentObj.textColor}`}>{selectedPaymentObj.transferValue}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => copyTextToClipboard(selectedPaymentObj.transferValue, 'pay_value')}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white transition-colors"
+                          >
+                            {copiedId === 'pay_value' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                          {selectedPaymentObj.isUrl && (
+                            <a
+                              href={selectedPaymentObj.transferValue}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white transition-colors"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between pt-2 border-t border-white/10 text-sm">
+                        <span className="text-slate-300">{tr('المبلغ المطلوب', 'Amount due')}</span>
+                        <span className="font-black text-emerald-400">{formatEGP(cartTotals.finalTotal, lang)}</span>
+                      </div>
+                    </div>
+
+                    {/* Receipt upload */}
+                    <div className="space-y-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleReceiptFileChange}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed border-white/20 hover:border-blue-500 text-sm text-slate-300 hover:text-white transition-all"
+                      >
+                        {uploadingReceipt ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                        <span>
+                          {checkoutForm.receiptFileName
+                            ? checkoutForm.receiptFileName
+                            : tr('ارفع صورة إيصال التحويل', 'Upload transfer receipt')}
+                        </span>
+                      </button>
+                      {checkoutForm.receiptImage && (
+                        <img src={checkoutForm.receiptImage} alt="receipt" className="max-h-40 rounded-xl border border-white/10 mx-auto" />
+                      )}
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={submittingOrder || cart.length === 0}
+                      className={`w-full py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+                        submittingOrder || cart.length === 0
+                          ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-600/25'
+                      }`}
+                    >
+                      {submittingOrder ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      <span>{submittingOrder ? tr('جاري التسجيل...', 'Submitting...') : tr('تأكيد الطلب', 'Place Order')}</span>
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* Post-Order Modal */}
+              {postOrderModal && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+                  <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setPostOrderModal(null)} />
+                  <div className="relative z-10 w-full max-w-md rounded-3xl bg-slate-950 border border-emerald-500/30 p-6 text-center space-y-4">
+                    <CheckCircle2 className="w-14 h-14 text-emerald-400 mx-auto" />
+                    <h3 className="text-xl font-black text-white">{tr('تم تسجيل طلبك!', 'Order Created!')}</h3>
+                    <p className="text-sm text-slate-300">
+                      {tr('رقم طلبك:', 'Your order number:')} <span className="font-mono font-bold text-cyan-400">{postOrderModal.orderNumber}</span>
+                    </p>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      {tr('أرسل رقم الطلب وصورة التحويل للإدارة عبر واتساب أو ماسنجر لاستلام حسابك فوراً.', 'Send your order number and receipt via WhatsApp or Messenger to receive your account.')}
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        onClick={() => handleConfirmViaWhatsApp(postOrderModal)}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all"
+                      >
+                        <PhoneCall className="w-4 h-4" />
+                        <span>{tr('واتساب', 'WhatsApp')}</span>
+                      </button>
+                      <button
+                        onClick={() => handleConfirmViaMessenger(postOrderModal)}
+                        className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all"
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                        <span>{tr('ماسنجر', 'Messenger')}</span>
+                      </button>
+                    </div>
+                    <button onClick={() => setPostOrderModal(null)} className="text-xs text-slate-400 hover:text-white">
+                      {tr('إغلاق', 'Close')}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Game Details Modal */}
+              {selectedGameModal && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+                  <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setSelectedGameModal(null)} />
+                  <div className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl bg-slate-950 border border-white/10 overflow-hidden">
+                    <div className="relative h-56 bg-slate-900">
+                      <img
+                        src={selectedGameModal.image}
+                        alt={selectedGameModal.title}
+                        onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/600x400/0f172a/38bdf8?text=PlayStation+Game'; }}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent" />
+                      <button
+                        onClick={() => setSelectedGameModal(null)}
+                        className="absolute top-3 right-3 p-2 rounded-xl bg-slate-950/80 text-slate-200 hover:bg-rose-600 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="p-6 space-y-3">
+                      <h3 className="text-xl font-black text-white">{selectedGameModal.title}</h3>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold">
+                        <span className="px-2.5 py-1 rounded-lg bg-white/10 text-white">{selectedGameModal.console}</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-blue-500/15 text-blue-300">{selectedGameModal.genre}</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300">★ {selectedGameModal.rating}</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300">{selectedGameModal.releaseYear}</span>
+                      </div>
+                      <p className="text-sm text-slate-300 leading-relaxed">{selectedGameModal.description}</p>
+                      <div className="grid grid-cols-2 gap-3 pt-2">
+                        <button
+                          disabled={Number(selectedGameModal.primaryStock) <= 0}
+                          onClick={() => { addToCart(selectedGameModal, 'Primary'); setSelectedGameModal(null); }}
+                          className={`p-3 rounded-2xl text-xs font-bold transition-all ${
+                            Number(selectedGameModal.primaryStock) <= 0 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-blue-600/20 border border-blue-500 text-blue-200 hover:bg-blue-600 hover:text-white'
+                          }`}
+                        >
+                          <div>{tr('أساسي', 'Primary')}</div>
+                          <div className="text-sm font-black">{formatEGP(selectedGameModal.primaryPrice, lang)}</div>
+                        </button>
+                        <button
+                          disabled={Number(selectedGameModal.secondaryStock) <= 0}
+                          onClick={() => { addToCart(selectedGameModal, 'Secondary'); setSelectedGameModal(null); }}
+                          className={`p-3 rounded-2xl text-xs font-bold transition-all ${
+                            Number(selectedGameModal.secondaryStock) <= 0 ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-purple-600/20 border border-purple-500 text-purple-200 hover:bg-purple-600 hover:text-white'
+                          }`}
+                        >
+                          <div>{tr('ثانوي', 'Secondary')}</div>
+                          <div className="text-sm font-black">{formatEGP(selectedGameModal.secondaryPrice, lang)}</div>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Delete Game Modal */}
+              {gameToDeleteModal && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+                  <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setGameToDeleteModal(null)} />
+                  <div className="relative z-10 w-full max-w-sm rounded-3xl bg-slate-950 border border-rose-500/30 p-6 text-center space-y-4">
+                    <AlertCircle className="w-12 h-12 text-rose-400 mx-auto" />
+                    <h3 className="text-lg font-black text-white">{tr('حذف اللعبة؟', 'Delete this game?')}</h3>
+                    <p className="text-sm text-slate-300">{gameToDeleteModal.title}</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleDeleteGame(gameToDeleteModal.id, gameToDeleteModal.title)}
+                        className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold transition-all"
+                      >
+                        {tr('حذف', 'Delete')}
+                      </button>
+                      <button
+                        onClick={() => setGameToDeleteModal(null)}
+                        className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-bold transition-all"
+                      >
+                        {tr('إلغاء', 'Cancel')}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Receipt Preview Modal */}
+              {receiptPreviewModal && (
+                <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+                  <div className="absolute inset-0 bg-black/85 backdrop-blur-sm" onClick={() => setReceiptPreviewModal(null)} />
+                  <div className="relative z-10 max-w-2xl w-full">
+                    <button
+                      onClick={() => setReceiptPreviewModal(null)}
+                      className="absolute -top-3 -right-3 p-2 rounded-full bg-slate-900 border border-white/20 text-white hover:bg-rose-600 transition-colors z-10"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                    <img src={receiptPreviewModal} alt="receipt" className="w-full max-h-[85vh] object-contain rounded-2xl border border-white/10 bg-slate-950" />
+                  </div>
+                </div>
+              )}
+
+              {/* Admin PIN Modal */}
+              {adminPinModalOpen && (
+                <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+                  <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => { setAdminPinModalOpen(false); setAdminPinInput(''); }} />
+                  <form
+                    onSubmit={handleAdminUnlockSubmit}
+                    className="relative z-10 w-full max-w-sm rounded-3xl bg-slate-950 border border-indigo-500/30 p-6 space-y-4 text-center"
+                  >
+                    <Lock className="w-10 h-10 text-indigo-400 mx-auto" />
+                    <h3 className="text-lg font-black text-white">{tr('الدخول للإدارة', 'Admin Access')}</h3>
+                    <input
+                      type="password"
+                      autoFocus
+                      dir="ltr"
+                      value={adminPinInput}
+                      onChange={(e) => setAdminPinInput(e.target.value)}
+                      placeholder={tr('الكود السري', 'Secret code')}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-sm text-white text-center focus:outline-none focus:border-indigo-500"
+                    />
+                    <button type="submit" className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all">
+                      {tr('دخول', 'Unlock')}
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* Manage Order Credentials Modal */}
+              {managingOrderModal && (
+                <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+                  <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setManagingOrderModal(null)} />
+                  <form
+                    onSubmit={handleSaveDispatchedCredentials}
+                    className="relative z-10 w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl bg-slate-950 border border-white/10 p-6 space-y-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-black text-white">
+                        {tr('بيانات الطلب', 'Order Credentials')} <span className="font-mono text-cyan-400">{managingOrderModal.orderNumber}</span>
+                      </h3>
+                      <button type="button" onClick={() => setManagingOrderModal(null)} className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {editableOrderAccounts.map((acc, idx) => (
+                      <div key={idx} className="rounded-2xl bg-slate-900 border border-white/10 p-4 space-y-2">
+                        <div className="text-sm font-bold text-white">
+                          {acc.title} • {acc.licenseType === 'Primary' ? tr('أساسي', 'Primary') : tr('ثانوي', 'Secondary')}
+                        </div>
+                        {[
+                          { key: 'psnEmail', label: 'PSN Email' },
+                          { key: 'psnPassword', label: 'PSN Password' },
+                          { key: 'twoStepCode', label: '2-Step Code' }
+                        ].map((f) => (
+                          <input
+                            key={f.key}
+                            type="text"
+                            dir="ltr"
+                            placeholder={f.label}
+                            value={acc[f.key] || ''}
+                            onChange={(e) => handleUpdateOrderCredentialField(idx, f.key, e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-white/10 text-xs text-white focus:outline-none focus:border-blue-500"
+                          />
+                        ))}
+                      </div>
+                    ))}
+
+                    <button type="submit" className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-all">
+                      {tr('حفظ وإرسال للعميل', 'Save & Send to Customer')}
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
